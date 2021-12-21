@@ -44,30 +44,33 @@ class Gamma:
 
     def __init__(self, U: Tensor, distance: Tensor,
                  number: Tensor, periodic=None, **kwargs) -> Tensor:
-        self.U = U
+        # deal with single and batch problem
+        U = U.unsqueeze(0) if U.dim() == 1 else U
+
+        # make sure the unfied dim for both periodic and non-periodic
+        U = U.unsqueeze(1) if U.dim() == 2 else U
         self.distance = distance
         self.periodic = periodic
         self.number = number
         self.gamma_type = kwargs.get('gamma_type', 'slater')
         self.method = kwargs.get('method', 'read')
+        # # call gamma funcitons
+        # if self.gamma_type == 'slater':
+        #     self.gamma = self.gamma_slater()
+        # elif self.gamma_type == 'gaussian':
+        #     self.gamma = self.gamma_gaussian()
 
-        # call gamma funcitons
-        if self.gamma_type == 'slater':
-            self.gamma = self.gamma_slater()
-        elif self.gamma_type == 'gaussian':
-            self.gamma = self.gamma_gaussian()
+        # All the system only have one atom, the gamma is zero
+        if U.shape[-1] == 1:
+            self.gamma = torch.zeros(*U.shape, U.shape[-1]).sum(1)
+        else:
+            self.gamma = getattr(Gamma, self.gamma_type)(self, U)
 
-    def gamma_slater(self):
+    def slater(self, U):
         """Build the Slater type gamma in second-order term."""
         # Construct index list for upper triangle gather operation
-        ut = torch.unbind(torch.triu_indices(
-            self.U.shape[-1], self.U.shape[-1], 1))
+        ut = torch.unbind(torch.triu_indices(U.shape[-1], U.shape[-1], 1))
 
-        # deal with single and batch problem
-        U = self.U.unsqueeze(0) if self.U.dim() == 1 else self.U
-
-        # make sure the unfied dim for both periodic and non-periodic
-        U = self.U.unsqueeze(1) if self.U.dim() == 2 else self.U
         dist = self.distance.unsqueeze(1) if self.distance.dim() == 3 else self.distance
 
         distance = dist[..., ut[0], ut[1]]

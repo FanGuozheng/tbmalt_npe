@@ -314,7 +314,7 @@ class _SymEigB(torch.autograd.Function):
         # Upper then lower triangle
         # if bf is complex
         if bf.dtype in (torch.complex32, torch.complex64, torch.complex128):
-            deltas = torch.tensor(deltas, dtype=bf.dtype)
+            deltas = deltas.clone().detach().to(bf.dtype)
         F[..., tri_u[0], tri_u[1]] = deltas
         F[..., tri_u[1], tri_u[0]] -= F[..., tri_u[0], tri_u[1]]
 
@@ -568,17 +568,17 @@ def eighb(a: Tensor,
                 l_inv = torch.inverse(l)
             else:
                 # Otherwise compute via an indirect method (default)
-                # l_inv = torch.solve(torch.eye(a.shape[-1], dtype=a.dtype,
-                #                               device=b.device), l)[0]
+                # ind make sure batch system with complex number correct
+                ind = (a.shape[0], 1, 1) if a.dim() == 3 else (1, 1)
                 l_inv = torch.linalg.solve(
-                    l, torch.eye(a.shape[-1], dtype=a.dtype, device=b.device))
+                    l, torch.eye(a.shape[-1], dtype=a.dtype, device=b.device).repeat(*ind))
+
             # Transpose of l_inv: improves speed in batch mode
             l_inv_t = torch.transpose(l_inv, -1, -2)
 
             # To obtain C, perform the reduction operation C = L^{-1}AL^{-T}
             if l_inv_t.dtype in (torch.complex32, torch.complex64, torch.complex128):
                 l_inv_t = torch.conj(l_inv_t)
-
             c = l_inv @ a @ l_inv_t
 
             # The eigenvalues of Az = λBz are the same as Cy = λy; hence:

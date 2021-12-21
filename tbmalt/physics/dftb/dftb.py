@@ -112,6 +112,7 @@ class Dftb:
             self._epsilon = epsilon.clone()
             self._eigvec = eigvec.clone()
         elif iiter > 0 and self.batch:
+            self._occ[self.mask, :self.occ.shape[-1]] = self.occ
             self._epsilon[self.mask, :epsilon.shape[-1]] = epsilon
             self._eigvec[self.mask, :eigvec.shape[-1],
                          :eigvec.shape[-1]] = eigvec.clone()
@@ -171,19 +172,19 @@ class Dftb:
         """Update data for each kpoints."""
         if iiter == 0:
             if n_kpoints is None:
-                self.epsilon = torch.zeros(*epsilon.shape)
+                self._epsilon = torch.zeros(*epsilon.shape)
                 self.eigenvector = torch.zeros(*eigvec.shape, dtype=self.dtype)
             elif ik == 0:
-                self.epsilon = torch.zeros(*epsilon.shape, n_kpoints)
+                self._epsilon = torch.zeros(*epsilon.shape, n_kpoints)
                 self.eigenvector = torch.zeros(
                     *eigvec.shape, n_kpoints, dtype=self.dtype)
 
         if ik is None:
-            self.epsilon[self.mask, :epsilon.shape[1]] = epsilon
+            self._epsilon[self.mask, :epsilon.shape[1]] = epsilon
             self.eigenvector[
                 self.mask, :eigvec.shape[1], :eigvec.shape[2]] = eigvec
         else:
-            self.epsilon[self.mask, :epsilon.shape[1], ik] = epsilon
+            self._epsilon[self.mask, :epsilon.shape[1], ik] = epsilon
             self.eigenvector[
                 self.mask, :eigvec.shape[1], :eigvec.shape[2], ik] = eigvec
 
@@ -191,6 +192,10 @@ class Dftb:
         """Expand Hubbert U for periodic system."""
         shape_cell = self.distances.shape[1]
         return u.repeat(shape_cell, 1, 1).transpose(0, 1)
+
+    def unit(self, unit: str = 'au') -> str:
+        """Set general unit for DFTB output."""
+        return unit
 
     @property
     def init_charge(self):
@@ -218,8 +223,12 @@ class Dftb:
         return pack([1.0 + (onsite[ib] - self.qzero[ib])[:nat[ib]] / numbers[
             ib][:nat[ib]] for ib in range(self.geometry._n_batch)])
 
+    # def eigenvalue_unit(self, unit: str = 'eV') -> str:
+    #     """Set generated eigenvalue unit."""
+    #     return unit
+
     @property
-    def eigenvalue(self, unit='eV'):
+    def eigenvalue(self, unit: str = 'eV'):
         """Return eigenvalue."""
         sca = _Hartree__eV if unit == 'eV' else 1.0
         return self._epsilon * sca
@@ -227,6 +236,10 @@ class Dftb:
     @property
     def charge(self):
         return self._charge
+
+    @property
+    def occupation(self):
+        return self._occ
 
     @property
     def total_energy(self):
@@ -356,6 +369,9 @@ class Dftb1(Dftb):
 
         self._charge = self.qm
 
+    def eigenvalue_unit(self, unit: str = 'eV'):
+        super().eigenvalue_unit(unit)
+
 
 class Dftb2(Dftb):
     """Self-consistent-charge density-functional tight-binding method."""
@@ -418,7 +434,6 @@ class Dftb2(Dftb):
         this_size = shift_mat.shape[-2]
         fock = self.ham[self.mask, :this_size, :this_size] + \
             0.5 * self.over[self.mask, :this_size, :this_size] * shift_mat
-
         if not self.geometry.isperiodic:
             d_q = self._charge[self.mask] - self.qzero[self.mask]
             self._shift = torch.bmm(d_q.unsqueeze(1), self.shift[self.mask])
@@ -440,7 +455,6 @@ class Dftb2(Dftb):
             self.qmix, _mask = self.mixer(self.qm)
             self._charge[self.mask] = self.qmix
             self._density[self.mask, :self.rho.shape[1], :self.rho.shape[2]] = self.rho
-            self._occ[self.mask, :self.occ.shape[-1]] = self.occ
             if iiter == 0:
                 self._shift_mat = _shift_mat.clone()
             else:
@@ -450,7 +464,7 @@ class Dftb2(Dftb):
             self.converge_number.append(_mask.sum().tolist())
 
         else:
-            self.ie, eigvec, nocc, density, q_new = [], [], [], [], []
+            ep, eigvec, nocc, density, q_new = [], [], [], [], []
             self._mask_k = []
 
             # Loop over all K-points
@@ -459,14 +473,14 @@ class Dftb2(Dftb):
                 # calculate the eigen-values & vectors
                 iep, ieig = maths.eighb(
                     fock[..., ik], self.over[self.mask, :this_size, :this_size, ik])
-                self.ie.append(iep), eigvec.append(ieig)
-                self._update_scc_ik(
-                    iep, ieig, self.over[..., ik],
-                    this_size, iiter, ik, torch.max(self.periodic.n_kpoints))
+                ep.append(iep), eigvec.append(ieig)
+                # self._update_scc_ik(
+                #     iep, ieig, self.over[..., ik],
+                #     this_size, iiter, ik, torch.max(self.periodic.n_kpoints))
 
-                iocc, inocc = fermi(iep, self.nelectron[self.mask])
+                occ, inocc = fermi(iep, self.nelectron[self.mask])
                 nocc.append(inocc)
-                iden = torch.sqrt(iocc).unsqueeze(1).expand_as(ieig) * ieig
+                iden = torch.sqrt(occ).unsqueeze(1).expand_as(ieig) * ieig
                 irho = (torch.conj(iden) @ iden.transpose(1, 2))  # -> density
                 density.append(irho)
 
@@ -481,16 +495,16 @@ class Dftb2(Dftb):
             self.rho = pack(density).permute(1, 2, 3, 0)
             if iiter == 0:
                 self.nocc = torch.zeros(*nocc.shape)
+                self.occ = torch.zeros(*occ.shape)
                 self._density = torch.zeros(*self.rho.shape, dtype=self.rho.dtype)
-
-            q_new = (pack(q_new).permute(2, 1, 0) * self.periodic.k_weights[
-                self.mask]).sum(-1).T
+            q_new = (pack(q_new).permute(2, 1, 0) * self.periodic.k_weights).sum(-1).T
             self.qmix, _mask = self.mixer(q_new)
-            epsilon = pack(self.ie)
+            epsilon = pack(ep)
             if iiter == 0:
                 self._epsilon = epsilon
                 self._charge = self.qmix
                 self._nocc = nocc
+                self._occ = occ
                 self._density = self.rho
             else:
                 self._epsilon[:epsilon.shape[0], self.mask, :epsilon.shape[-1]] = epsilon

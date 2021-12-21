@@ -13,17 +13,13 @@ import torch
 import ase
 import ase.io as io
 import h5py
+from torch.utils.data import DataLoader, Dataset
 from tbmalt.common.batch import pack
 from tbmalt.structures.geometry import Geometry
 ATOMNUM = {'H': 1, 'C': 6, 'N': 7, 'O': 8}
 HIRSH_VOL = [10.31539447, 0., 0., 0., 0., 38.37861207, 29.90025370, 23.60491416]
 Tensor = torch.Tensor
 
-
-class Hdf(ABC):
-
-    def __init__(self):
-        pass
 
 
 class ReadGeometry:
@@ -92,14 +88,6 @@ def to_geo(positions: list, species: list, number_mol: list):
             mol_obj = ase.Atoms(specie, mol)
             ase.io.write(str(mol_obj.symbols) + '.gen.' + str(ii), mol_obj, format='dftb')
 
-# if __name__ == '__main__':
-#     """Read from ANI-1 and write into DFTB+ geo type data."""
-#     path_to_hdf = '/home/gz_fan/Public/tbmalt/dataset/ani_gdb_s03.h5'
-#     positions, species, energies = read_hdf(path_to_hdf)
-#     print(species, [ip.shape for ip in positions], len(positions))
-#     # the [2] * len(species) is the number of molecules for each molecule specie
-#     # to_geo(positions, species, [2] * len(species))
-
 
 class AniDataloader:
     """Interface to ANI-1 data."""
@@ -116,7 +104,7 @@ class AniDataloader:
         return count
 
 
-class LoadHdf(Hdf):
+class LoadHdf(Dataset):
     """Load h5py binary dataset.
 
     Arguments:
@@ -193,6 +181,12 @@ class LoadHdf(Hdf):
             positions.extend([icoor for icoor in _coorall[ispe][:isize]])
 
         return numbers, positions, symbols, atom_specie_global
+
+    def __getitem__(self):
+        pass
+
+    def __len__(self):
+        pass
 
     @classmethod
     def load_reference(cls, dataset, size, properties, **kwargs):
@@ -323,44 +317,3 @@ class LoadQM7:
             positions.append(coor)
             symbols.append(symbols_)
             specie.append(list(set(symbols_)))
-
-
-class Split:
-    """Split tensor according to chunks of split_sizes.
-
-    Parameters
-    ----------
-    tensor : `torch.Tensor`
-        Tensor to be split
-    split_sizes : `list` [`int`], `torch.tensor` [`int`]
-        Size of the chunks
-    dim : `int`
-        Dimension along which to split tensor
-
-    Returns
-    -------
-    chunked : `tuple` [`torch.tensor`]
-        List of tensors viewing the original ``tensor`` as a
-        series of ``split_sizes`` sized chunks.
-
-    Raises
-    ------
-    KeyError
-        If number of elements requested via ``split_sizes`` exceeds hte
-        the number of elements present in ``tensor``.
-    """
-    def __init__(tensor, split_sizes, dim=0):
-        if dim < 0:  # Shift dim to be compatible with torch.narrow
-            dim += tensor.dim()
-
-        # Ensure the tensor is large enough to satisfy the chunk declaration.
-        if tensor.size(dim) != split_sizes.sum():
-            raise KeyError(
-                'Sum of split sizes fails to match tensor length along specified dim')
-
-        # Identify the slice positions
-        splits = torch.cumsum(torch.Tensor([0, *split_sizes]), dim=0)[:-1]
-
-        # Return the sliced tensor. use torch.narrow to avoid data duplication
-        return tuple(tensor.narrow(int(dim), int(start), int(length))
-                     for start, length in zip(splits, split_sizes))
