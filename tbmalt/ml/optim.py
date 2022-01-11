@@ -192,24 +192,25 @@ class OptVcr(Optim):
         """Initialize parameters."""
         self.compr_grid = compr_grid
         self.global_r = kwargs.get('global_r', False)
+        self.repulsive = kwargs.get('repulsive', False)
         self.unique_atomic_numbers = geometry.unique_atomic_numbers()
 
         if not self.global_r:
-            # self.compr = torch.ones(geometry.atomic_numbers.shape) * 3.5
+            self.compr = torch.ones(geometry.atomic_numbers.shape) * 3.5
             # self.compr.requires_grad_(True)
-            self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
-            init_dict = {1: torch.tensor([2.5, 3.0]),
-                         6: torch.tensor([7.0, 2.7]),
-                         7: torch.tensor([8.0, 2.2]),
-                         8: torch.tensor([8.0, 2.3])}
-            for ii, iu in enumerate(self.unique_atomic_numbers):
-                mask = geometry.atomic_numbers == iu
-                self.compr[mask] = init_dict[iu.tolist()]
+            # self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
+            # init_dict = {1: torch.tensor([2.5, 3.0]),
+            #              6: torch.tensor([7.0, 2.7]),
+            #              7: torch.tensor([8.0, 2.2]),
+            #              8: torch.tensor([8.0, 2.3])}
+            # for ii, iu in enumerate(self.unique_atomic_numbers):
+            #     mask = geometry.atomic_numbers == iu
+            #     self.compr[mask] = init_dict[iu.tolist()]
 
             self.compr.requires_grad_(True)
         else:
-            self.compr0 = torch.tensor([3.0, 2.7, 2.2, 2.3])
-            # self.compr0 = torch.ones(len(self.unique_atomic_numbers)) * 3.5
+            # self.compr0 = torch.tensor([3.0, 2.7, 2.2, 2.3])
+            self.compr0 = torch.ones(len(self.unique_atomic_numbers)) * 3.5
             self.compr = torch.zeros(geometry.atomic_numbers.shape)
             self.compr0.requires_grad_(True)
 
@@ -237,7 +238,8 @@ class OptVcr(Optim):
                 geometry, reference, [self.compr0], parameter, **kwargs)
 
         self.skparams = SkfParamFeed.from_dir(
-            parameter['dftb']['path_to_skf'], self.geometry, skf_type=skf_type)
+            parameter['dftb']['path_to_skf'], self.geometry, skf_type=skf_type,
+            repulsive=self.repulsive)
         if self.geometry.isperiodic:
             self.periodic = Periodic(self.geometry, self.geometry.cell,
                                      cutoff=self.skparams.cutoff, **kwargs)
@@ -285,7 +287,7 @@ class OptVcr(Optim):
 
         self.ham_list.append(ham.detach()), self.over_list.append(over.detach())
         self.dftb = Dftb2(self.geometry, self.shell_dict,
-                          self.params['dftb']['path_to_skf'])
+                          self.params['dftb']['path_to_skf'], self.repulsive)
         self.dftb(hamiltonian=ham, overlap=over)
         super().__loss__(self.dftb)
         self._compr.append(self.compr.detach().clone())

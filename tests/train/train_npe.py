@@ -29,7 +29,7 @@ device = torch.device('cpu')
 # optimize params #
 ###################
 size_opt = 30
-params['ml']['task'] = 'vcr'
+params['ml']['task'] = 'mlIntegral'
 params['ml']['compression_radii_min'] = 2.0
 params['ml']['compression_radii_max'] = 9.0
 dataset_aims = './dataset/aims_6000_01.hdf'
@@ -38,7 +38,7 @@ params['ml']['targets'] = ['charge']  # charge, dipole, gap, cpa, homo_lumo
 params['ml']['max_steps'] = 12
 h_compr_feed = True
 s_compr_feed = True
-global_r = True
+global_r = False
 break_tolerance = True
 params['ml']['charge_weight'], params['ml']['dipole_weight'] = 1.0, 1.0
 

@@ -14,7 +14,7 @@ import ase
 import ase.io as io
 import h5py
 from tbmalt.common.batch import pack
-from tbmalt.structures.geometry import Geometry
+from tbmalt.structures.geometry import Geometry, to_atomic_numbers
 ATOMNUM = {'H': 1, 'C': 6, 'N': 7, 'O': 8}
 HIRSH_VOL = [10.31539447, 0., 0., 0., 0., 38.37861207, 29.90025370, 23.60491416]
 Tensor = torch.Tensor
@@ -104,14 +104,40 @@ def to_geo(positions: list, species: list, number_mol: list):
 class AniDataloader:
     """Interface to ANI-1 data."""
 
-    def __init__(self, store_file):
-        if not os.path.exists(store_file):
-            exit('Error: file not found - ' + store_file)
-        self.store = h5py.File(store_file, 'r')
+    def __init__(self, input):
+        if not os.path.exists(input):
+            exit('Error: file not found - ' + input)
+        self.input = h5py.File(input, 'r')
 
+    def iterator(self, g, prefix=''):
+        """Group recursive iterator."""
+        for key in g.keys():
+            item = g[key]
+            path = '{}/{}'.format(prefix, key)
+            keys = [i for i in item.keys()]
+            if isinstance(item[keys[0]], h5py.Dataset):  # test for dataset
+                data = {'path': path}
+                for k in keys:
+                    if not isinstance(item[k], h5py.Group):
+                        dataset = np.array(item[k][()])
+                        if type(dataset) is np.ndarray:
+                            if dataset.size != 0:
+                                if type(dataset[0]) is np.bytes_:
+                                    dataset = [a.decode('ascii') for a in dataset]
+
+                        data.update({k: dataset})
+
+                yield data
+            else:
+                yield from self.iterator(item, path)
+
+    def __iter__(self):
+        """Default class iterator (iterate through all data)."""
+        for data in self.iterator(self.input):
+            yield data
     def size(self):
         count = 0
-        for g in self.store.values():
+        for g in self.input.values():
             count = count + len(g.items())
         return count
 
@@ -182,7 +208,7 @@ class LoadHdf(Hdf):
 
             # add atom species in each molecule specie
             _specie.append(data['species'])
-            _number.append(Geometry.to_element_number(data['species']).squeeze())
+            _number.append(to_atomic_numbers(data['species']).squeeze())
 
         for ispe, isize in enumerate(n_molecule):
             # get symbols of each atom

@@ -56,11 +56,11 @@ class AseAims:
     def run_aims(self, positions, symbols, latvecs, properties):
         """Run batch systems with ASE-DFTB."""
         self.symbols = symbols
-        self.latvecs = latvecs
+        latvecs = latvecs if latvecs is not None else torch.zeros(
+            1, 3, 3).repeat(len(positions), 1, 1)
         results = {}
         for iproperty in properties:
             results[iproperty] = []
-
         for iposition, isymbol, ilatvec in zip(positions, symbols, latvecs):
             # run each molecule in batches
             self.symbol, self.position,\
@@ -87,16 +87,26 @@ class AseAims:
             mol = Atoms(self.symbol, positions=self.position, cell=self.latvec,
                         pbc=self.pbc)
 
-        cal = Aims(xc='PBE',
-                   output=['mulliken', 'dos -18.  5.  500  0.1'],
-                   dos_kgrid_factors='8 8 8',
-                   sc_accuracy_etot=1e-6,
-                   sc_accuracy_eev=1e-3,
-                   sc_accuracy_rho=1e-6,
-                   sc_accuracy_forces=1e-4,
-                   many_body_dispersion=' ',
-                   k_grid=self.kpoint,
-                   command="ulimit -s unlimited; mpirun -np 4 ./aims.x > aims.out")
+        if self.latvec.eq(0).all():  # -> molecule
+            cal = Aims(xc='PBE',
+                       output=['mulliken'],
+                       sc_accuracy_etot=1e-6,
+                       sc_accuracy_eev=1e-3,
+                       sc_accuracy_rho=1e-6,
+                       sc_accuracy_forces=1e-4,
+                       many_body_dispersion=' ',
+                       command="ulimit -s unlimited; ./aims.x > aims.out")
+        else:  # -> solid
+            cal = Aims(xc='PBE',
+                       output=['mulliken', 'dos -18.  5.  500  0.1'],
+                       dos_kgrid_factors='8 8 8',
+                       sc_accuracy_etot=1e-6,
+                       sc_accuracy_eev=1e-3,
+                       sc_accuracy_rho=1e-6,
+                       sc_accuracy_forces=1e-4,
+                       many_body_dispersion=' ',
+                       k_grid=self.kpoint,
+                       command="ulimit -s unlimited; mpirun -np 4 ./aims.x > aims.out")
 
         # get calculators
         mol.calc = cal

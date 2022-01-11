@@ -35,14 +35,17 @@ params = {
 
     'ml': {
         'lr': 0.1,
-        'min_steps': 60,  # -> min training steps
+        'min_steps': 6,  # -> min training steps
         'max_steps': 120,  # -> max training steps
         'loss_function': 'MSELoss',  # MSELoss, L1Loss
         'optimizer': 'Adam',  # SCG, Adam
         'compression_radii_min': 1.5,
         'compression_radii_max': 9.0,
         'method': 'linear',
-        'tolerance': 1E-5
+        'tolerance': 1E-5,
+        'charge_weight': 1,
+        'dipole_weight': 1,
+        'cpa_weight': 1
         }
 
     }

@@ -265,7 +265,7 @@ class SkfFeed(_SkFeed):
                  shell_dict: Dict[int, List[int]],
                  skf_type: Literal['h5', 'skf'] = 'h5',
                  geometry: Optional[dict] = None,
-                 elements: Optional[list] = None,
+                 element_numbers: Optional[list] = None,
                  integral_type: Literal['H', 'S'] = 'H',
                  **kwargs) -> 'SkfFeed':
         """Read all skf files like the normal way in DFTB+ and return SkFeed.
@@ -329,7 +329,7 @@ class SkfFeed(_SkFeed):
                  ' will generate binary with smoothed integral tails.')
 
         # unique atom pairs is from either elements or geometry
-        assert elements is not None or geometry is not None, 'both ' + \
+        assert element_numbers is not None or geometry is not None, 'both ' + \
             'elements and geometry are None.'
 
         # create a blank dict for integrals
@@ -338,8 +338,11 @@ class SkfFeed(_SkFeed):
         # get global unique element species pair with geometry object
         if geometry is not None:
             element_pair = unique_atom_pairs(geometry)
-        elif elements is not None:
-            element_pair = unique_atom_pairs(symbols=elements)
+        # elif elements is not None:
+        #     element_pair = unique_atom_pairs(symbols=elements)
+        elif element_numbers is not None:
+            element_pair = unique_atom_pairs(
+                unique_atomic_numbers=element_numbers)
         if skf_type == 'skf':
             _element_name = [batch_chemical_symbols(ie) for ie in element_pair]
             _path = [os.path.join(path, ien[0] + '-' + ien[1] + '.skf')
@@ -977,6 +980,7 @@ class SkfParamFeed:
         """
         # The device will first read from geometry, if geometry is None
         # then from kwargs dictionary, default is cpu
+        repulsive = kwargs.get('repulsive', True)
         if geometry is not None:
             device = geometry.positions.device
             dtype = geometry.positions.dtype
@@ -1026,7 +1030,7 @@ class SkfParamFeed:
                               'mass')] = skf.mass[0].to(dtype)
 
             sktable_dict[(*ielement.tolist(), 'hs_cut')] = skf.hs_cutoff
-            sktable_dict = _get_dict(sktable_dict, skf)
+            sktable_dict = _get_dict(sktable_dict, skf, repulsive)
 
         return cls(sktable_dict, geometry)
 
@@ -1090,7 +1094,7 @@ def _get_homo_dict(sktable_dict: dict, skf: object, **kwargs) -> dict:
     return sktable_dict
 
 
-def _get_dict(sk_dict: dict, skf: Skf) -> Tuple[dict, dict]:
+def _get_dict(sk_dict: dict, skf: Skf, repulsive: bool = True) -> Tuple[dict, dict]:
     """Get Hamiltonian or overlap tables for each orbital interaction.
 
     Arguments:
@@ -1103,13 +1107,14 @@ def _get_dict(sk_dict: dict, skf: Skf) -> Tuple[dict, dict]:
         s_dict: Dictionary with updated overlap tables.
 
     """
-    sk_dict[(*skf.atom_pair.tolist(), 'grid')] = skf.r_spline.grid
-    sk_dict[(*skf.atom_pair.tolist(), 'long_grid')] = torch.stack(
-        [skf.r_spline.grid[-1], skf.r_spline.cutoff])
-    sk_dict[(*skf.atom_pair.tolist(), 'rep_cut')] = skf.r_spline.cutoff
-    sk_dict[(*skf.atom_pair.tolist(), 'spline_coef')] = skf.r_spline.spline_coef
-    sk_dict[(*skf.atom_pair.tolist(), 'exp_coef')] = skf.r_spline.exp_coef
-    sk_dict[(*skf.atom_pair.tolist(), 'tail_coef')] = skf.r_spline.tail_coef
+    if repulsive:
+        sk_dict[(*skf.atom_pair.tolist(), 'grid')] = skf.r_spline.grid
+        sk_dict[(*skf.atom_pair.tolist(), 'long_grid')] = torch.stack(
+            [skf.r_spline.grid[-1], skf.r_spline.cutoff])
+        sk_dict[(*skf.atom_pair.tolist(), 'rep_cut')] = skf.r_spline.cutoff
+        sk_dict[(*skf.atom_pair.tolist(), 'spline_coef')] = skf.r_spline.spline_coef
+        sk_dict[(*skf.atom_pair.tolist(), 'exp_coef')] = skf.r_spline.exp_coef
+        sk_dict[(*skf.atom_pair.tolist(), 'tail_coef')] = skf.r_spline.tail_coef
 
     if skf.atom_pair[0] == skf.atom_pair[1]:
         sk_dict[(skf.atom_pair[0].tolist(), 'occupations')] = skf.occupations

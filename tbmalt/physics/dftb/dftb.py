@@ -51,7 +51,7 @@ class Dftb:
             path_to_skf, shell_dict, vcr=_grids, skf_type=skf_type,
             geometry=geometry, interpolation=_interp, integral_type='S')
         self.skparams = SkfParamFeed.from_dir(
-            path_to_skf, geometry, skf_type=skf_type)
+            path_to_skf, geometry, skf_type=skf_type, repulsive=self.repulsive)
 
     def init_dftb(self, **kwargs):
         self._n_batch = self.geometry._n_batch if self.geometry._n_batch \
@@ -314,15 +314,19 @@ class Dftb1(Dftb):
     """Density-functional tight-binding method with 0th correction."""
 
     def __init__(self,
-                 geometry: Geometry,
-                 shell_dict: dict = None,
-                 basis: object = None,
-                 repulsive=True,
-                 skf_type: str = 'h5', **kwargs):
+                 geometry: object,
+                 shell_dict: Dict[int, List[int]],
+                 path_to_skf: str,
+                 repulsive: bool = True,
+                 skf_type: Literal['h5', 'skf'] = 'h5',
+                 basis_type: str = 'normal',
+                 periodic: Periodic = None,
+                 mixer: str = 'Anderson',
+                 **kwargs):
         self.method = 'Dftb1'
         self.maxiter = kwargs.get('maxiter', 1)
-        super().__init__(
-            geometry, shell_dict, basis, repulsive, skf_type, **kwargs)
+        super().__init__(geometry, shell_dict, path_to_skf,
+                         repulsive, skf_type, basis_type, periodic, mixer, **kwargs)
         super().init_dftb(**kwargs)
 
     def __call__(self,

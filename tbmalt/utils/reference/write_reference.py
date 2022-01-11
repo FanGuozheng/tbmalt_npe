@@ -5,7 +5,7 @@ The skf include normal skf files or skf with a list of compression radii.
 import h5py
 import torch
 import numpy as np
-from tbmalt.io.loadhdf import LoadHdf
+from tbmalt.io.hdf import LoadHdf
 from tbmalt.utils.ase.ase_aims import AseAims
 from tbmalt.utils.ase.ase_dftbplus import AseDftb
 
@@ -65,7 +65,7 @@ class CalReference:
 
         """
         if self.reference_type == 'aims':
-            aims = AseAims(self.path_to_aims, self.path_to_aims_specie, periodic='self.periodic')
+            aims = AseAims(self.path_to_aims, self.path_to_aims_specie, periodic=self.periodic)
             result = aims.run_aims(self.positions, self.symbols, self.latvecs, properties)
 
         elif self.reference_type == 'dftbplus':
