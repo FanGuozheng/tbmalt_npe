@@ -699,8 +699,6 @@ class PolyInterpU:
 
             # # result[is_tail] = poly_to_zero2(
             # #     dr, -1.0 * self.tail, -1.0 / self.tail, y1, y1p, y1pp)
-            # print('result', result.shape, 'result[is_tail]', result[is_tail].shape,
-            #       poly5_zero(y1, y1p, y1pp, dr, -1.0 * self.tail).shape)
             # result[is_tail] = poly5_zero(y1, y1p, y1pp, dr, -1.0 * self.tail)
 
             dr = rr[is_tail] - r_max

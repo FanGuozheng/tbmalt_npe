@@ -17,7 +17,7 @@ from torch import Tensor
 from tbmalt.common.maths import triangular_root, tetrahedral_root
 from tbmalt.data import atomic_numbers, chemical_symbols
 from tbmalt.common.batch import pack
-from tbmalt.common.maths.interpolation import poly_to_zero, vcr_poly_to_zero
+from tbmalt.common.maths.interpolation import vcr_poly_to_zero
 
 OptTens = Optional[Tensor]
 SkDict = Dict[Tuple[int, int], Tensor]

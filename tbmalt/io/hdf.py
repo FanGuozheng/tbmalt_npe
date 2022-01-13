@@ -16,10 +16,17 @@ import h5py
 from torch.utils.data import DataLoader, Dataset
 from tbmalt.common.batch import pack
 from tbmalt.structures.geometry import Geometry
+from tbmalt.common.batch import pack
+from tbmalt.structures.geometry import Geometry, to_atomic_numbers
 ATOMNUM = {'H': 1, 'C': 6, 'N': 7, 'O': 8}
 HIRSH_VOL = [10.31539447, 0., 0., 0., 0., 38.37861207, 29.90025370, 23.60491416]
 Tensor = torch.Tensor
 
+
+class Hdf(ABC):
+
+    def __init__(self):
+        pass
 
 
 class ReadGeometry:
@@ -92,19 +99,45 @@ def to_geo(positions: list, species: list, number_mol: list):
 class AniDataloader:
     """Interface to ANI-1 data."""
 
-    def __init__(self, store_file):
-        if not os.path.exists(store_file):
-            exit('Error: file not found - ' + store_file)
-        self.store = h5py.File(store_file, 'r')
+    def __init__(self, input):
+        if not os.path.exists(input):
+            exit('Error: file not found - ' + input)
+        self.input = h5py.File(input, 'r')
 
+    def iterator(self, g, prefix=''):
+        """Group recursive iterator."""
+        for key in g.keys():
+            item = g[key]
+            path = '{}/{}'.format(prefix, key)
+            keys = [i for i in item.keys()]
+            if isinstance(item[keys[0]], h5py.Dataset):  # test for dataset
+                data = {'path': path}
+                for k in keys:
+                    if not isinstance(item[k], h5py.Group):
+                        dataset = np.array(item[k][()])
+                        if type(dataset) is np.ndarray:
+                            if dataset.size != 0:
+                                if type(dataset[0]) is np.bytes_:
+                                    dataset = [a.decode('ascii') for a in dataset]
+
+                        data.update({k: dataset})
+
+                yield data
+            else:
+                yield from self.iterator(item, path)
+
+    def __iter__(self):
+        """Default class iterator (iterate through all data)."""
+        for data in self.iterator(self.input):
+            yield data
     def size(self):
         count = 0
-        for g in self.store.values():
+        for g in self.input.values():
             count = count + len(g.items())
         return count
 
 
-class LoadHdf(Dataset):
+class LoadHdf(Hdf):
     """Load h5py binary dataset.
 
     Arguments:
@@ -170,7 +203,7 @@ class LoadHdf(Dataset):
 
             # add atom species in each molecule specie
             _specie.append(data['species'])
-            _number.append(Geometry.to_element_number(data['species']).squeeze())
+            _number.append(to_atomic_numbers(data['species']).squeeze())
 
         for ispe, isize in enumerate(n_molecule):
             # get symbols of each atom
@@ -317,3 +350,44 @@ class LoadQM7:
             positions.append(coor)
             symbols.append(symbols_)
             specie.append(list(set(symbols_)))
+
+
+class Split:
+    """Split tensor according to chunks of split_sizes.
+
+    Parameters
+    ----------
+    tensor : `torch.Tensor`
+        Tensor to be split
+    split_sizes : `list` [`int`], `torch.tensor` [`int`]
+        Size of the chunks
+    dim : `int`
+        Dimension along which to split tensor
+
+    Returns
+    -------
+    chunked : `tuple` [`torch.tensor`]
+        List of tensors viewing the original ``tensor`` as a
+        series of ``split_sizes`` sized chunks.
+
+    Raises
+    ------
+    KeyError
+        If number of elements requested via ``split_sizes`` exceeds hte
+        the number of elements present in ``tensor``.
+    """
+    def __init__(tensor, split_sizes, dim=0):
+        if dim < 0:  # Shift dim to be compatible with torch.narrow
+            dim += tensor.dim()
+
+        # Ensure the tensor is large enough to satisfy the chunk declaration.
+        if tensor.size(dim) != split_sizes.sum():
+            raise KeyError(
+                'Sum of split sizes fails to match tensor length along specified dim')
+
+        # Identify the slice positions
+        splits = torch.cumsum(torch.Tensor([0, *split_sizes]), dim=0)[:-1]
+
+        # Return the sliced tensor. use torch.narrow to avoid data duplication
+        return tuple(tensor.narrow(int(dim), int(start), int(length))
+                     for start, length in zip(splits, split_sizes))

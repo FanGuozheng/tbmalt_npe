@@ -475,3 +475,8 @@ def unique_atom_pairs(geometry: Optional[Geometry] = None,
     n_global = len(uan)
     return torch.stack([uan.repeat(n_global),
                         uan.repeat_interleave(n_global)]).T
+
+
+def to_atomic_numbers(species: list):
+    """Return atomic numbers from element species."""
+    return torch.tensor([chemical_symbols.index(isp) for isp in species])
