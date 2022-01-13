@@ -43,7 +43,9 @@ class Acsf:
                  extra_params: Optional[dict] = None,
                  unit: Literal['bohr', 'angstrom'] = 'angstrom',
                  element_resolve: Optional[bool] = True,
-                 atom_like: Optional[bool] = True):
+                 atom_like: Optional[bool] = True,
+                 orbital_resolve: bool = False,
+                 atom_resolve: bool = False):
         self.geometry = geometry
         self.unit = unit
 
@@ -58,6 +60,9 @@ class Acsf:
         self.extra_params = extra_params
         self.atom_like = atom_like
         self.element_resolve = element_resolve
+
+        # If add keep \sum{Gij} like output or Gij like output
+        self.orbital_resolve = orbital_resolve
 
         # Set atomic numbers batch like
         an = self.geometry.atomic_numbers
@@ -199,7 +204,10 @@ class Acsf:
     def g1_func(self, g1_params):
         """Calculate G1 parameters."""
         _g1, self.mask = self._fc(self.distances, g1_params)
-        g1 = self._element_wise(_g1)
+        if not self.orbital_resolve:
+            g1 = self._element_wise(_g1)
+        else:
+            g1 = _g1
 
         # oprions of return type, if element_resolve, each atom specie will be
         # calculated seperatedly, else return the sum
@@ -210,11 +218,18 @@ class Acsf:
         _g2 = torch.zeros(self.distances.shape)
         _g2[self.mask] = torch.exp(
             -g2[..., 0] * ((g2[..., 1] - self._dist[self.mask])) ** 2)
-        g2 = self._element_wise(_g2 * self.fc)
+        if self.orbital_resolve:
+            g2 = _g2
+        else:
+            g2 = self._element_wise(_g2 * self.fc)
         g = g.unsqueeze(1) if g.dim() == 1 else g
 
-        return (torch.cat([g, g2], dim=1), g2) if self.element_resolve else \
-            (torch.cat([g, g2.sum(-1).unsqueeze(1)], dim=1), g2)
+        if self.orbital_resolve:
+            return (torch.stack([g, g2], dim=-1), g2) if self.element_resolve \
+                else (torch.cat([g, g2.sum(-1).unsqueeze(1)], dim=1), g2)
+        else:
+            return (torch.cat([g, g2], dim=1), g2) if self.element_resolve \
+                else (torch.cat([g, g2.sum(-1).unsqueeze(1)], dim=1), g2)
 
     def g3_func(self, g, g3_params):
         """Calculate G2 parameters."""
