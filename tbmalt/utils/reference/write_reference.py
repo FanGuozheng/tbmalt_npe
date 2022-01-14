@@ -15,8 +15,8 @@ class CalReference:
 
     Arguments:
         path_to_input: Joint path and input files.
-        input_type: The input file type, such as hdf, json, etc.
-        reference_type: The type of reference, such as FHI-aims, DFTB+.
+        dataset_type: The input file type, such as hdf, json, etc.
+        calculator: The calculator to be reference, such as FHI-aims, DFTB+.
 
     Keyword Args:
         path_to_skf: Joint path and SKF files if reference is DFTB+.
@@ -24,19 +24,19 @@ class CalReference:
             is FHI-aims.
     """
 
-    def __init__(self, path_to_input: str, input_type: str, size: int,
-                 reference_type='dftbplus', **kwargs):
+    def __init__(self, path_to_input: str, dataset_type: str, size: int,
+                 calculator='dftbplus', **kwargs):
         """Calculate and write reference properties from DFT(B)."""
         self.path_input = path_to_input
-        self.input_type = input_type
-        self.reference_type = reference_type
+        self.dataset_type = dataset_type
+        self.calculator = calculator
         self.periodic = kwargs.get('periodic', False)
 
-        if self.reference_type == 'dftbplus':
+        if self.calculator == 'dftbplus':
             self.path_to_dftbplus = kwargs.get('path_to_dftbplus', './dftb+')
             self.path_to_skf = kwargs.get('path_to_skf', './')
 
-        elif self.reference_type == 'aims':
+        elif self.calculator == 'aims':
             self.path_to_aims = kwargs.get('path_to_aims', './aims.x')
             self.path_to_aims_specie = kwargs.get('path_to_aims_specie', './')
 
@@ -45,14 +45,14 @@ class CalReference:
         self.positions = dataset.positions
         self.symbols = dataset.symbols
         self.atom_specie_global = dataset.atom_specie_global
-        self.latvecs = dataset.latvec if self.input_type == 'Si' else None
+        self.latvecs = dataset.latvec if self.dataset_type == 'Si' else None
 
     def _load_input(self, size):
         """Load."""
-        if self.input_type == 'ANI-1':
-            return LoadHdf(self.path_input, size, self.input_type)
-        elif self.input_type == 'Si':
-            return LoadHdf(self.path_input, size, self.input_type)
+        if self.dataset_type in ('ANI-1', 'ANIx'):
+            return LoadHdf(self.path_input, size, self.dataset_type)
+        elif self.dataset_type == 'Si':
+            return LoadHdf(self.path_input, size, self.dataset_type)
 
     def __call__(self, properties: list, **kwargs):
         """Call WriteSK.
@@ -64,11 +64,11 @@ class CalReference:
         Keyword Args:
 
         """
-        if self.reference_type == 'aims':
+        if self.calculator == 'aims':
             aims = AseAims(self.path_to_aims, self.path_to_aims_specie, periodic=self.periodic)
             result = aims.run_aims(self.positions, self.symbols, self.latvecs, properties)
 
-        elif self.reference_type == 'dftbplus':
+        elif self.calculator == 'dftbplus':
             dftb = AseDftb(self.path_to_dftbplus, self.path_to_skf,
                            properties, **kwargs)
             result = dftb.run_dftb(self.positions, self.symbols, self.latvecs, properties)
@@ -87,11 +87,11 @@ class CalReference:
         Keyword Args:
             mode: a: append, w: write into new output file.
         """
-        input_type = kwargs.get('input_type', 'ANI-1')
+        dataset_type = kwargs.get('dataset_type', 'ANI-1')
         numbers = cal_reference.numbers
         symbols = cal_reference.symbols
         positions = cal_reference.positions
-        if input_type == 'Si':
+        if dataset_type == 'Si':
             latvec = cal_reference.latvecs
         atom_specie_global = cal_reference.atom_specie_global
         output_name = kwargs.get('output_name', 'reference.hdf')
@@ -133,7 +133,7 @@ class CalReference:
                 n_system = g.attrs['n_molecule']  # each molecule specie number
                 g.attrs['n_molecule'] = n_system + 1
                 g.create_dataset(str(n_system + 1) + 'position', data=positions[ii])
-                if input_type == 'Si':
+                if dataset_type == 'Si':
                     g.create_dataset(str(n_system + 1) + 'lattice vector', data=latvec[ii])
 
                 for iproperty in properties:

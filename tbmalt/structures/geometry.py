@@ -154,9 +154,15 @@ class Geometry:
             dist = torch.cdist(self.positions, self.positions, p=2)
             # Ensure padding area is zeroed out
             dist[self._mask_dist] = 0
-            return dist
         else:
-            return torch.sqrt((self.updated_dist_vec ** 2).sum(-1))
+            dist = torch.sqrt((self.updated_dist_vec ** 2).sum(-1))
+
+        # cdist bug, sometimes distances diagonal is not zero
+        _ind = torch.arange(dist.shape[-1])
+        if not (dist[..., _ind, _ind].eq(0)).all():
+            dist[..., _ind, _ind] = 0
+
+        return dist
 
     @property
     def distance_vectors(self) -> Tensor:
@@ -452,7 +458,8 @@ def batch_chemical_symbols(atomic_numbers: Union[Tensor, List[Tensor]]
 
 
 def unique_atom_pairs(geometry: Optional[Geometry] = None,
-                      unique_atomic_numbers: Optional[Tensor] = None) -> Tensor:
+                      unique_atomic_numbers: Optional[Tensor] = None,
+                      repeat_pairs: bool = True) -> Tensor:
     """Returns a tensor specifying all unique atom pairs.
 
     This takes `Geometry` instance and identifies all atom pairs. This use
@@ -461,6 +468,8 @@ def unique_atom_pairs(geometry: Optional[Geometry] = None,
 
     Arguments:
          geometry: `Geometry` instance representing the target system.
+         unique_atomic_numbers: Use `unique_atomic_numbers` to build pairs.
+         repeat_pairs: If return pair A-B and B-A or only return A-B.
 
     Returns:
         unique_atom_pairs: A tensor specifying all unique atom pairs.
@@ -473,10 +482,26 @@ def unique_atom_pairs(geometry: Optional[Geometry] = None,
         raise ValueError('Both geometry and unique_atomic_numbers are None.')
 
     n_global = len(uan)
-    return torch.stack([uan.repeat(n_global),
-                        uan.repeat_interleave(n_global)]).T
+
+    if repeat_pairs:
+        return torch.stack([uan.repeat(n_global),
+                            uan.repeat_interleave(n_global)]).T
+    else:
+        return torch.stack([torch.stack([ia, ja]) for i, ia in enumerate(uan)
+                            for ja in uan[i:]])
 
 
-def to_atomic_numbers(species: list):
+def to_atomic_numbers(species: list) -> Tensor:
     """Return atomic numbers from element species."""
     return torch.tensor([chemical_symbols.index(isp) for isp in species])
+
+
+def to_element_species(atomic_numbers: Union[Tensor]) -> list:
+    """Return element species from atomic numbers."""
+    assert atomic_numbers.dim() in (1, 2), \
+        f'get input dimension {atomic_numbers.dim()} not 1 or 2'
+    if atomic_numbers.dim() == 1:
+        return [chemical_symbols[int(ia)] for ia in atomic_numbers]
+    else:
+        return [[chemical_symbols[int(ia)] for ia in atomic_number]
+                for atomic_number in atomic_numbers]

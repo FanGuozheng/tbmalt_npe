@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from ase import Atoms as Atoms
-from dscribe.descriptors import CoulombMatrix, ACSF, SOAP
+from dscribe.descriptors import CoulombMatrix, ACSF, SOAP, MBTR
 from tbmalt.structures.geometry import Geometry
 from tbmalt.data import chemical_symbols
 from tbmalt.common.batch import pack
@@ -212,8 +212,33 @@ class Dscribe:
         #     zip(species, self.geometry.numbers, self.geometry.positions.numpy())])
         return _soap
 
-    def manybody(self):
-        pass
+    def mbtr(self, **kwargs):
+        uat = self.geometry.unique_atomic_numbers()
+        species = [chemical_symbols[iat] for iat in uat]
+        dtype = torch.get_default_dtype()
+        mbtr = MBTR(species=species,
+                    k1={
+                        "geometry": {"function": "atomic_number"},
+                        "grid": {"min": 0, "max": 8, "n": 100, "sigma": 0.1},
+                    },
+                    k2={
+                        "geometry": {"function": "inverse_distance"},
+                        "grid": {"min": 0, "max": 1, "n": 100, "sigma": 0.1},
+                        "weighting": {"function": "exp", "scale": 0.5, "threshold": 1e-3},
+                    },
+                    k3={
+                        "geometry": {"function": "cosine"},
+                        "grid": {"min": -1, "max": 1, "n": 100, "sigma": 0.1},
+                        "weighting": {"function": "exp", "scale": 0.5, "threshold": 1e-3},
+                    },
+                    periodic=False,
+                    normalization="l2_each")
+
+        _mbtr = torch.cat([
+            torch.tensor(mbtr.create(Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
+            for ispe, inum, ipos in
+            zip(self.geometry.chemical_symbols, self.geometry.atomic_numbers,
+                self.geometry.positions.numpy())])
 
     def kernels(self):
         pass

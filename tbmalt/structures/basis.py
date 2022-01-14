@@ -98,7 +98,7 @@ class Basis:
             [sum([l * 2 + 1 for l in v]) for v in shell_dict.values()])
 
         self.shell_ns, self.shell_ls = torch.tensor(
-            [(i, l) for n in self.atomic_numbers.view(-1) if n != 0
+            [(i, l) for n in self.atomic_numbers.reshape(-1) if n != 0
              for i, l in enumerate(shell_dict[int(n)])], **kwargs).T
 
         if batch:
@@ -139,7 +139,7 @@ class Basis:
     @property
     def orbs_per_atom(self) -> Tensor:
         """Number of orbitals associated with each atom."""
-        return self._orbitals_per_species[self.atomic_numbers.view(-1)
+        return self._orbitals_per_species[self.atomic_numbers.reshape(-1)
                                    ].view_as(self.atomic_numbers)
 
     @property
@@ -410,6 +410,8 @@ class Basis:
 
                 - "full": 1 matrix-element per orbital-orbital interaction.
                 - "shell": 1 matrix-element per shell-shell interaction block.
+                - "atomic": 1 matrix-element per max_shell-max_shell
+                        interaction block for each atomic pair.
 
                 A more in-depth description of the this argument's effects is
                 given in :meth:`.azimuthal_matrix`. [DEFAULT="full"]
@@ -423,9 +425,6 @@ class Basis:
             ValueError: If an invalid ``form`` option is passed
 
         """
-        if form == 'atomic':
-            raise ValueError('Shell matrix can not be given in "atomic" form')
-
         # 1) Make the first row of the NxN matrix
         s_mat = self.shell_ns.clone()
 
@@ -434,6 +433,13 @@ class Basis:
                 self.shell_ls == -1, 0, self.shell_ls * 2 + 1).view(-1))
             if self.atomic_numbers.dim() == 2:  # "if batch"
                 s_mat = pack(split_by_size(s_mat, self.n_orbitals), value=-1)
+        elif form == 'atomic':
+            _an = self.atomic_numbers[self.atomic_numbers.ne(0)]
+            s_mat = torch.zeros(_an.shape)
+            for iuat in torch.unique(_an):
+                s_mat[_an == iuat] = max(self.shell_dict[int(iuat)])
+            if self.atomic_numbers.dim() == 2:  # "if batch"
+                s_mat = pack(split_by_size(s_mat.view(-1), self.n_atoms), value=-1)
 
         # Convert the rows into a full NxNx2 tensor and return it
         return _rows_to_NxNx2(s_mat, self.matrix_shape(form), -1)
@@ -485,6 +491,24 @@ class Basis:
         # Convert the rows into a full NxNx2 tensor and return it
         return _rows_to_NxNx2(an_mat, self.matrix_shape(form), 0)
 
+    def angular_matrix(self) -> Tensor:
+        r"""Atomic numbers associated with each orbital-orbital pair.
+
+        Returns:
+            angular_matrix: An NxNxNx3 tensor specifying the atomic
+                numbers associated with each interaction. N can be the number
+                of orbitals, shells or atoms depending on ``form``.
+
+        Raises:
+            ValueError: If an invalid ``form`` option is passed.
+
+        """
+        an_mat = self.atomic_numbers
+        size = torch.Size((*an_mat.shape, an_mat.shape[-1], an_mat.shape[-1]))
+
+        # Convert the rows into a full NxNx2 tensor and return it
+        return _rows_to_NxNxNx3(an_mat, size, 0)
+
     def index_matrix(self, form: Form = 'full') -> Tensor:
         """Indices of the atoms associated with each orbital pair.
 
@@ -522,7 +546,7 @@ class Basis:
         elif form == 'shell':
             i_mat = arange(
                 self.n_atoms.max(), device=self.__device).expand_as(
-                ans).repeat_interleave(self._shells_per_species[ans.view(-1)])
+                ans).repeat_interleave(self._shells_per_species[ans.reshape(-1)])
 
             if self.atomic_numbers.dim() == 2:  # "if batch"
                 i_mat = pack(split_by_size(i_mat, self.n_shells), value=-1)
@@ -551,6 +575,25 @@ def _rows_to_NxNx2(vec: Tensor, shape: Size, pad: Optional[Any] = None
     mat[mat[..., 0, :] == pad] = pad  # Mask down columns
     # Form the NxN slice into the full NxNx2 tensor and return it.
     return torch.stack((mat.transpose(-1, -2), mat), -1)
+
+
+def _rows_to_NxNxNx3(vec: Tensor, shape: Size, pad: Optional[Any] = None
+    ) -> Tensor:
+    """Takes a row & converts it into its final NxNx2 shape.
+
+    Arguments:
+        vec: The vector that is to be expanded into a tensor.
+        shape: The final, batch agnostic, shape of the tensor.
+        pad: Values which are to be padded after expansion.
+
+    """
+    # Expand rows into first NxN slice of the matrix and mask as needed
+    mat = vec.unsqueeze(-2).expand(shape[:-1]).clone()
+    mat[mat[..., 0, :] == pad] = pad  # Mask down columns
+    mat = mat.unsqueeze(-2).expand(shape).clone()
+    mat[mat[..., 0, :] == pad] = pad  # Mask down columns
+    # Form the NxN slice into the full NxNx2 tensor and return it.
+    return torch.stack((mat.transpose(-2, -1), mat.transpose(-1, -2), mat), -1)
 
 
 def _repeat_range(tensor, **kwargs):

@@ -1,12 +1,13 @@
 """Train code."""
 from typing import Literal
+import logging
 import numpy as np
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
-from tbmalt import Geometry, SkfParamFeed
+from tbmalt import Geometry, Dftb2, SkfParamFeed
 from tbmalt.common.maths import hellinger
 from tbmalt.common.batch import pack
-from tbmalt.physics.dftb.dftb import Dftb2
 from tbmalt.ml.skfeeds import SkfFeed, VcrFeed, TvcrFeed
 from tbmalt.structures.basis import Basis
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
@@ -17,7 +18,7 @@ from tbmalt.structures.periodic import Periodic
 Tensor = torch.Tensor
 
 
-class Optim:
+class Model(nn.Module):
     """Optimizer template for DFTB parameters training.
 
     Arguments:
@@ -30,7 +31,8 @@ class Optim:
     """
 
     def __init__(self, geometry: Geometry, reference: dict, variables: list,
-                 params: dict, tolerance: float = 1E-7, **kwargs):
+                 params: dict, logger, tolerance: float = 1E-7, **kwargs):
+        super(Model, self).__init__()
         self.geometry = geometry
         self.batch_size = self.geometry._n_batch
         self.reference = reference
@@ -39,6 +41,7 @@ class Optim:
 
         self.params = params
         self.tolerance = tolerance
+        self.logger = logging.getLogger() if logger is None else logger
 
         # Initialize all targets with None
         for target in self.params['ml']['targets']:
@@ -54,7 +57,7 @@ class Optim:
         self.optimizer = getattr(
             torch.optim, self.params['ml']['optimizer'])(self.variable, lr=self.lr)
 
-    def __call__(self, **kwargs):
+    def forward(self, **kwargs):
         """Call train class with properties."""
         self.loss_list = []
         self.loss_list.append(0)
@@ -106,11 +109,17 @@ class Optim:
         return hellinger(dos, refdos[..., 1])
 
 
-class OptHs(Optim):
+class OptHs(Model):
     """Optimize integrals with spline interpolation."""
 
-    def __init__(self, geometry: Geometry, reference, parameter, shell_dict,
-                 skf_type: Literal['h5', 'skf'] = 'h5', **kwargs):
+    def __init__(
+            self,
+            geometry: Geometry,
+            reference, parameter, shell_dict,
+            skf_type: Literal['h5', 'skf'] = 'h5',
+            logger: logging.RootLogger = None,
+            **kwargs
+            ):
         kpoints = kwargs.get('kpoints', None)
         self.basis = Basis(geometry.atomic_numbers, shell_dict)
         self.shell_dict = shell_dict
@@ -131,7 +140,7 @@ class OptHs(Optim):
         if build_abcd_s:
             self.ml_variable.extend(self.s_feed.off_site_dict['variable'])
         super().__init__(geometry, reference, self.ml_variable, parameter,
-                         **kwargs)
+                         logger, **kwargs)
 
         self.skparams = SkfParamFeed.from_dir(
             parameter['dftb']['path_to_skf'], self.geometry, skf_type=skf_type)
@@ -139,14 +148,15 @@ class OptHs(Optim):
             self.periodic = Periodic(self.geometry, self.geometry.cell,
                                      cutoff=self.skparams.cutoff, **kwargs)
 
-    def __call__(self, plot: bool =True, save: bool = True, **kwargs):
+    def forward(self, plot: bool =True, save: bool = True, **kwargs):
         """Train spline parameters with target properties."""
-        super().__call__()
+        self.logger.info('training...')
+        super().forward()
         self._loss = []
         for istep in range(self.steps):
             self._update_train()
-            print('step: ', istep, 'loss: ', self.loss.detach())
-            self._loss.append(self.loss.detach())
+            self._loss.append(self.loss.detach().tolist())
+            self.logger.info(f'step: {istep}, loss: %.6f'%self._loss[-1])
 
             break_tolerance = istep >= self.params['ml']['min_steps']
             if self.reach_convergence and break_tolerance:
@@ -183,13 +193,18 @@ class OptHs(Optim):
         return dftb
 
 
-class OptVcr(Optim):
-    """Optimize compression radii."""
+class OptVcr(Model):
+    """Optimize compression radii in basis functions."""
 
-    def __init__(self, geometry: Geometry, reference, parameter,
-                 compr_grid: Tensor, shell_dict: dict,
-                 skf_type: Literal['h5', 'skf'] = 'h5', **kwargs):
-        """Initialize parameters."""
+    def __init__(
+            self,
+            geometry: Geometry,
+            reference, parameter,
+            compr_grid: Tensor, shell_dict: dict,
+            skf_type: Literal['h5', 'skf'] = 'h5',
+            logger: logging.RootLogger = None,
+            **kwargs
+            ):
         self.compr_grid = compr_grid
         self.global_r = kwargs.get('global_r', False)
         self.repulsive = kwargs.get('repulsive', False)
@@ -232,10 +247,10 @@ class OptVcr(Optim):
 
         if not self.global_r:
             super().__init__(
-                geometry, reference, [self.compr], parameter, **kwargs)
+                geometry, reference, [self.compr], parameter, logger, **kwargs)
         else:
             super().__init__(
-                geometry, reference, [self.compr0], parameter, **kwargs)
+                geometry, reference, [self.compr0], parameter, logger, **kwargs)
 
         self.skparams = SkfParamFeed.from_dir(
             parameter['dftb']['path_to_skf'], self.geometry, skf_type=skf_type,
@@ -247,14 +262,16 @@ class OptVcr(Optim):
             self.periodic = None
 
 
-    def __call__(self, plot: bool = True, save: bool = True, **kwargs):
+    def forward(self, plot: bool = True, save: bool = True, **kwargs):
         """Train compression radii with target properties."""
-        super().__call__()
+        super().forward()
         self._compr = []
         self.ham_list,self.over_list = [], []
+        self._loss = []
         for istep in range(self.steps):
             self._update_train()
-            print('step: ', istep, 'loss: ', self.loss.detach())
+            self._loss.append(self.loss.detach().tolist())
+            self.logger.info(f'step: {istep}, loss: %.6f'%self._loss[-1])
 
             break_tolerance = istep >= self.params['ml']['min_steps']
             if self.reach_convergence and break_tolerance:
@@ -355,7 +372,7 @@ class OptVcr(Optim):
         return dftb2
 
 
-class OptTvcr(Optim):
+class OptTvcr(Model):
     """Optimize compression radii."""
 
     def __init__(self, geometry: Geometry, reference, parameter,
@@ -414,9 +431,9 @@ class OptTvcr(Optim):
             super().__init__(
                 geometry, reference, [self.compr0], parameter, **kwargs)
 
-    def __call__(self, plot: bool = True, save: bool = True, **kwargs):
+    def forward(self, plot: bool = True, save: bool = True, **kwargs):
         """Train compression radii with target properties."""
-        super().__call__()
+        super().forward()
         self._compr = []
         self.ham_list,self.over_list = [], []
         for istep in range(self.steps):

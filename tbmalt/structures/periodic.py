@@ -64,17 +64,17 @@ class Periodic:
 
         self.recvec = self._reciprocal_lattice()
 
-        # Unit cell volume
+        # Unit cell volume and original cell information
         self.cellvol = abs(torch.det(self.latvec))
-
         self.cellvec, self.rcellvec, self.ncell = self.get_cell_translations(**kwargs)
 
         # K-sampling
         self.kpoints, self.n_kpoints, self.k_weights = self._kpoints(**kwargs)
 
+        # Remove cell where all atoms are beyond cutoff
         if return_distance is True:
             self.positions_vec, self.periodic_distances = self._periodic_distance()
-            self.neighbour_vec, self.neighbour_dis = self._neighbourlist()
+            self.neighbour_vec, self.neighbour_dis, self.ncell = self._neighbourlist()
 
     def _check(self, latvec, cutoff, **kwargs):
         """Check dimension, type of lattice vector and cutoff."""
@@ -178,7 +178,8 @@ class Periodic:
                               for ibatch in range(self.cutoff.size(0))], value=1e3)
         neighbour_dis = pack([self.periodic_distances[ibatch][_mask[ibatch]]
                               for ibatch in range(self.cutoff.size(0))], value=1e3)
-        return neighbour_vec, neighbour_dis
+
+        return neighbour_vec, neighbour_dis, _mask.sum(-1)
 
     def _inverse_lattice(self):
         """Get inverse lattice vectors."""
@@ -286,29 +287,58 @@ class Periodic:
         # print('all_kpoints', all_kpoints)
         # return all_kpoints.squeeze(-1).permute(1, 2, 0), _n_kpoints, k_weights
 
-    def _klines(self, _klines: Tensor):
+    def _klines(self, klines: Tensor):
         """K-lines."""
-        _n_klines = _klines[..., -1].long()
-        _n_kpoints = _n_klines.sum(-1)
-        _n_klines_flat = _n_klines.flatten()
+        # _nklines = klines[..., -1].long()
+        # _n_kpoints = _nklines.sum(-1)
+        # _nklines_flat = _nklines.flatten()
 
-        # Each K-points baseline (original points) and difference
-        # original points (for each batch): k0, k0, k1 ... k_N-1
-        # difference: delta_0_0, delta_1_0, delta_2_1 ... delta_N_N-1
-        _klines_base = torch.cat([
-            _klines[:, 0, :-1].unsqueeze(1), _klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
-        _klines_diff = torch.cat([
-            torch.zeros(_klines.shape[0], 1, 3),
-            _klines[:, 1:, :-1] - _klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
+        # # Each K-points baseline (original points) and difference
+        # # original points (for each batch): k0, k0, k1 ... k_N-1
+        # # difference: delta_0_0, delta_1_0, delta_2_1 ... delta_N_N-1
+        # klines_base = torch.cat([
+        #     klines[:, 0, :-1].unsqueeze(1), klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
+        # klines_diff = torch.cat([
+        #     torch.zeros(klines.shape[0], 1, 3),
+        #     klines[:, 1:, :-1] - klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
 
-        _klines_ext = torch.cat([ib + idiff * torch.linspace(
-            0., 1., irep).repeat(3, 1).T for ib, idiff, irep in
-            zip(_klines_base, _klines_diff, _n_klines_flat)])
-        _klines_ext = pack(torch.split(_klines_ext, tuple(_n_kpoints)))
+        # klines_ext = torch.cat([ib + idiff * torch.linspace(
+        #     0., 1., irep).repeat(3, 1).T for ib, idiff, irep in
+        #     zip(klines_base, klines_diff, _nklines_flat)])
+        # klines_ext = pack(torch.split(klines_ext, tuple(_n_kpoints)))
 
-        k_weights = 1.0 / _n_kpoints
+        # # In every single system, each kpoint has the same weight
+        # k_weights = pack([torch.ones(int(nk)) * 1.0 / nk for nk in _n_kpoints])
 
-        return _klines_ext, _n_kpoints, k_weights
+        # return klines_ext, _n_kpoints, k_weights
+
+        if self._n_batch == 1:
+            if klines.dim() == 2:
+                klines = klines.unsqueeze(0)
+            elif klines.dim() > 3 or klines.dim() == 1:
+                raise ValueError(f'klines dims should be 2 or 3, get {klines.dim()}')
+        else:
+            assert klines.dim() == 3, f'klines dims should be 3, get {klines.dim()}'
+
+        _n_kpoints = klines[..., -1].sum(-1).long()
+        klines = klines.flatten(0, 1)
+        _mask = klines[..., -1].ge(1)
+
+        delta_k = klines[..., 3: 6] - klines[..., :3]
+        delta_k[_mask] = delta_k[_mask] / (klines[..., -1][_mask].unsqueeze(-1) - 1)
+        delta_k = torch.repeat_interleave(delta_k, klines[..., -1].long(), 0)
+        repeat_nums = torch.cat([
+            torch.arange(ik) for ik in klines[..., -1].long()]).unsqueeze(-1)
+        klines_ext = torch.repeat_interleave(
+            klines[..., :3], klines[..., -1].long(), 0) + delta_k * repeat_nums
+        klines_ext = pack(klines_ext.split(tuple(_n_kpoints.tolist())))
+
+        k_weights = torch.zeros(klines[..., -1].shape)
+        k_weights[_mask] = 1.0 / klines[..., -1][_mask]
+        k_weights = torch.repeat_interleave(k_weights, klines[..., -1].long())
+        k_weights = pack(k_weights.split(tuple(_n_kpoints.tolist())))
+
+        return klines_ext, _n_kpoints, k_weights
 
     def get_reciprocal_volume(self):
         """Get reciprocal lattice unit cell volume."""
@@ -349,10 +379,6 @@ class Periodic:
         # shape: [n_batch, n_cell, 3]
         cell_vec = self.cellvec_neighbour
 
-        # Get packed selected cell_vector within the cutoff [n_batch, max_cell, 3]
-        # return pack([torch.exp((0. + 1.0j) * torch.bmm(
-        #     ik[mask[0]].unsqueeze(1), cell_vec[mask[0]]))
-        #     for ik in kpoint.permute(1, 0, -1)]).squeeze(2)
         return pack([torch.exp((0. + 1.0j) * torch.einsum(
             'ij, ijk-> ik', ik, cell_vec)) for ik in kpoint.permute(1, 0, -1)])
 

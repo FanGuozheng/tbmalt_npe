@@ -15,9 +15,7 @@ import ase.io as io
 import h5py
 from torch.utils.data import DataLoader, Dataset
 from tbmalt.common.batch import pack
-from tbmalt.structures.geometry import Geometry
-from tbmalt.common.batch import pack
-from tbmalt.structures.geometry import Geometry, to_atomic_numbers
+from tbmalt.structures.geometry import Geometry, to_atomic_numbers, to_element_species
 ATOMNUM = {'H': 1, 'C': 6, 'N': 7, 'O': 8}
 HIRSH_VOL = [10.31539447, 0., 0., 0., 0., 38.37861207, 29.90025370, 23.60491416]
 Tensor = torch.Tensor
@@ -27,44 +25,6 @@ class Hdf(ABC):
 
     def __init__(self):
         pass
-
-
-class ReadGeometry:
-    """Transfer various input geometry to TBMaLT geometry or h5 files.
-
-    Arguments:
-        geometry_files: Single or batch input files.
-
-    """
-
-    def __init__(self, geometry_files: Union[str, list],
-                 geometry_out_type: Literal['h5', 'ase', 'geometry'] = 'cif',
-                 geometry_out_path: str = './'):
-        self.geometry_files = geometry_files
-        self.geometry_out_type = geometry_out_type
-        self.geometry_out_path = geometry_out_path
-        if os.path.isdir(geometry_out_path):
-            os.system('rm -r ' + geometry_out_path)
-            logging.getLogger(f'{geometry_out_path} exist, romove current dir')
-
-        # Build output dir
-        os.system('mkdir -p ' + self.geometry_out_path)
-
-    def cif(self):
-        """"""
-        if isinstance(self.geometry_files, list):
-            _in = [io.read(ii) for ii in self.geometry_files]
-            if self.geometry_out_type == 'geometry':
-                return Geometry.from_ase_atoms(_in)
-            elif self.geometry_out_type == 'aims':
-                [io.write('geometry.in.' + str(ii), iin, format='aims')
-                 for ii, iin in enumerate(_in)]
-                os.system('mv geometry.in.* ' + self.geometry_out_path)
-            elif self.geometry_out_type == 'dftbplus':
-                [io.write('geo.gen.' + str(ii), iin, format='dftb')
-                 for ii, iin in enumerate(_in)]
-                os.system('mv geo.gen.* ' + self.geometry_out_path)
-
 
 
 def read_hdf(path_to_hdf: str) -> Tuple[list, list, list]:
@@ -156,6 +116,9 @@ class LoadHdf(Hdf):
         if hdf_type == 'ANI-1':
             self.numbers, self.positions, self.symbols, \
                 self.atom_specie_global = self.load_ani1(**kwargs)
+        elif hdf_type == 'ANIx':
+            self.numbers, self.positions, self.symbols, \
+                self.atom_specie_global = self.load_anix(**kwargs)
         elif hdf_type == 'hdf_reference':
             self.load_reference()
 
@@ -260,6 +223,66 @@ class LoadHdf(Hdf):
                 data[ipro] = pack(data[ipro])
 
         return numbers, positions, data
+
+    def load_anix(self, **kwargs):
+        """Load the data from hdf type input files."""
+        dtype = kwargs.get('dtype', np.float64)
+        min_size_molecule = kwargs.get('min_size_molecule', 100)
+
+        # define the output
+        numbers, positions = [], []
+
+        # symbols for each molecule, global atom specie
+        symbols, atom_specie_global = [], []
+
+        # temporal coordinates for all
+        _coorall = []
+
+        # temporal molecule species for all
+        _specie, _number = [], []
+
+        # temporal number of molecules in all molecule species
+        n_molecule = []
+
+        # load each ani_gdb_s0*.h5 data in datalist
+        adl = AniDataloader(self.dataset)
+        # adl = h5py.File('./dataset/ani1x-release.h5')
+        self.in_size = round(self.size / adl.size())  # each group size
+
+        # such as for ani_gdb_s01.h5, there are 3 species: CH4, NH3, H2O
+        for iadl, data in enumerate(adl):
+
+            # get each molecule specie size
+            size_ani = len(data['coordinates'])
+            if size_ani > min_size_molecule:
+                print('iadl', iadl, size_ani)
+                isize = min(self.size, size_ani)
+                _spe = to_element_species(torch.from_numpy(data['atomic_numbers']))
+                # global species
+                for ispe in _spe:
+                    if ispe not in atom_specie_global:
+                        atom_specie_global.append(ispe)
+
+                # size of each molecule specie
+                n_molecule.append(isize)
+
+                # selected coordinates of each molecule specie
+                _coorall.append(torch.from_numpy(
+                    data['coordinates'][:isize].astype(dtype)))
+
+                # add atom species in each molecule specie
+                _specie.append(_spe)
+                _number.append(torch.from_numpy(data['atomic_numbers']).squeeze())
+
+        for ispe, isize in enumerate(n_molecule):
+            # get symbols of each atom
+            symbols.extend([_specie[ispe]] * isize)
+            numbers.extend([_number[ispe]] * isize)
+
+            # add coordinates
+            positions.extend([icoor for icoor in _coorall[ispe][:isize]])
+
+        return numbers, positions, symbols, atom_specie_global
 
     @classmethod
     def to_out_type(cls, data, out_type):

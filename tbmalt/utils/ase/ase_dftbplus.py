@@ -3,6 +3,7 @@
 # -*- coding: utf-8 -*-
 import re
 import os
+import logging
 import numpy as np
 import torch
 from ase import Atoms
@@ -13,7 +14,7 @@ DFTB_ENERGY = {"H": -0.238600544, "C": -1.398493891, "N": -2.0621839400,
 AIMS_ENERGY = {"H": -0.45891649, "C": -37.77330663, "N": -54.46973501,
                "O": -75.03140052}
 _AUEV = 27.2113845
-
+logger = logging.getLogger(__name__)
 
 class AseDftb:
     """Run DFTB+, return results, write into hdf5."""
@@ -61,8 +62,10 @@ class AseDftb:
             results[iproperty] = []
 
         if self.latvecs is None:
-            for iposition, isymbol in zip(positions, symbols):
+            for ii, (iposition, isymbol) in enumerate(zip(positions, symbols)):
                 # run each molecule in batches
+                print('symbol', ii, isymbol)
+                logger.info(f'Calculating {isymbol}')
                 self.position, self.symbol = iposition, isymbol
                 self.nat = len(iposition)
 

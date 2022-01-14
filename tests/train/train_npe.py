@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from torch import Tensor
 from ase.build import molecule
 
 from tbmalt.structures.geometry import Geometry
@@ -15,9 +16,10 @@ from tbmalt.physics.dftb.dftb import Dftb2
 from tbmalt.ml.skfeeds import SkfFeed
 from tbmalt.structures.basis import Basis
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
-from torch import Tensor
+
 torch.set_printoptions(15)
 torch.set_default_dtype(torch.float64)
+
 
 ###########
 # general #
@@ -29,11 +31,11 @@ device = torch.device('cpu')
 # optimize params #
 ###################
 size_opt = 30
-params['ml']['task'] = 'mlIntegral'
+params['ml']['task'] = 'vcr'
 params['ml']['compression_radii_min'] = 2.0
 params['ml']['compression_radii_max'] = 9.0
-dataset_aims = './dataset/aims_6000_01.hdf'
-dataset_dftb = './dataset/scc_6000_01.hdf'
+dataset_aims = './dataset/aims_2000_03.hdf'
+dataset_dftb = './dataset/scc_2000_03.hdf'
 params['ml']['targets'] = ['charge']  # charge, dipole, gap, cpa, homo_lumo
 params['ml']['max_steps'] = 12
 h_compr_feed = True

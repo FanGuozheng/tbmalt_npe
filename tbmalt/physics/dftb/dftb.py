@@ -4,6 +4,7 @@ implement pytorch to DFTB
 """
 from typing import Literal, Dict, List, Optional
 import torch
+import torch.nn as nn
 from torch import Tensor
 import tbmalt.common.maths as maths
 from tbmalt import Basis, Geometry, SkfFeed, SkfParamFeed, hs_matrix
@@ -19,17 +20,19 @@ from tbmalt.structures.periodic import Periodic
 from tbmalt.physics.coulomb import Coulomb
 
 
-class Dftb:
-    def __init__(self,
-                 geometry: Geometry,
-                 shell_dict: Dict[int, List[int]],
-                 path_to_skf: str,
-                 repulsive: bool = False,
-                 skf_type: Literal['h5', 'skf'] = 'h5',
-                 basis_type: str = 'normal',
-                 periodic: Periodic = None,
-                 mixer: str = 'Anderson',
-                 **kwargs):
+class Dftb(nn.Module):
+    def __init__(
+            self,
+            geometry: Geometry,
+            shell_dict: Dict[int, List[int]],
+            path_to_skf: str,
+            repulsive: bool = False,
+            skf_type: Literal['h5', 'skf'] = 'h5',
+            basis_type: str = 'normal',
+            periodic: Periodic = None,
+            mixer: str = 'Anderson',
+            **kwargs):
+        super(Dftb, self).__init__()
         self.skf_type = skf_type
         self.shell_dict = shell_dict
         self.geometry = geometry
@@ -91,10 +94,13 @@ class Dftb:
 
     def _update_shift(self):
         """Update shift."""
-        return torch.stack([(im - iz) @ ig for im, iz, ig in zip(
-            self.charge[self.mask], self.qzero[self.mask], self.shift[self.mask])])
+        # return torch.stack([(im - iz) @ ig for im, iz, ig in zip(
+        #     self.charge[self.mask], self.qzero[self.mask], self.shift[self.mask])])
+        return torch.einsum('ij, ijk-> ik',
+                            (self.charge - self.qzero)[self.mask],
+                            self.shift[self.mask])
 
-    def __call__(self, hamiltonian, overlap, iiter):
+    def forward(self, hamiltonian, overlap, iiter):
         # calculate the eigen-values & vectors via a Cholesky decomposition
         epsilon, eigvec = maths.eighb(hamiltonian, overlap)
 
@@ -171,20 +177,18 @@ class Dftb:
                        iiter, ik=None, n_kpoints=None):
         """Update data for each kpoints."""
         if iiter == 0:
-            if n_kpoints is None:
-                self._epsilon = torch.zeros(*epsilon.shape)
+            if ik is None:
+                # self._epsilon = torch.zeros(*epsilon.shape)
                 self.eigenvector = torch.zeros(*eigvec.shape, dtype=self.dtype)
             elif ik == 0:
-                self._epsilon = torch.zeros(*epsilon.shape, n_kpoints)
                 self.epsilon = torch.zeros(*epsilon.shape)
                 self.eigenvector = torch.zeros(*eigvec.shape, dtype=self.dtype)
 
         if ik is None:
-            self._epsilon[self.mask, :epsilon.shape[1]] = epsilon
+            # self._epsilon[self.mask, :epsilon.shape[1]] = epsilon
             self.eigenvector[
                 self.mask, :eigvec.shape[1], :eigvec.shape[2]] = eigvec
         else:
-            self._epsilon[self.mask, :epsilon.shape[1], ik] = epsilon
             self.epsilon[self.mask, :epsilon.shape[1]] = epsilon
             self.eigenvector[
                 self.mask, :eigvec.shape[1], :eigvec.shape[2]] = eigvec
@@ -339,16 +343,24 @@ class Dftb1(Dftb):
                  **kwargs):
         self.method = 'Dftb1'
         self.maxiter = kwargs.get('maxiter', 1)
-        super().__init__(geometry, shell_dict, path_to_skf,
-                         repulsive, skf_type, basis_type, periodic, mixer, **kwargs)
+        super().__init__(
+            geometry=geometry,
+            shell_dict=shell_dict,
+            path_to_skf=path_to_skf,
+            repulsive=repulsive,
+            skf_type=skf_type,
+            basis_type=basis_type,
+            periodic=periodic,
+            mixer=mixer,
+            **kwargs)
         super().init_dftb(**kwargs)
 
-    def __call__(self,
-                 charge: Tensor = None,  # -> Initial charge
-                 geometry: Geometry = None,  # Update Geometry
-                 hamiltonian: Tensor = None,
-                 overlap: Tensor = None,
-                 **kwargs):
+    def forward(self,
+                charge: Tensor = None,  # -> Initial charge
+                geometry: Geometry = None,  # Update Geometry
+                hamiltonian: Tensor = None,
+                overlap: Tensor = None,
+                **kwargs):
         if geometry is not None:
             super()._next_geometry(geometry, **kwargs)
         self.shift = self._get_shift()
@@ -368,9 +380,9 @@ class Dftb1(Dftb):
                                            for ishift in self.shift_orb])
 
             self.hamiltonian = self.ham + 0.5 * self.over * self._shift_mat
-            self.qm = super().__call__(self.hamiltonian, self.over, iiter=0)
+            self.qm = super().forward(self.hamiltonian, self.over, iiter=0)
         else:
-            self.qm = super().__call__(self.ham, self.over, iiter=0)
+            self.qm = super().forward(self.ham, self.over, iiter=0)
 
         self._charge = self.qm
 
@@ -393,18 +405,27 @@ class Dftb2(Dftb):
                  **kwargs):
         self.method = 'Dftb2'
         self.maxiter = kwargs.get('maxiter', 60)
-        super().__init__(geometry, shell_dict, path_to_skf,
-                         repulsive, skf_type, basis_type, periodic, mixer, **kwargs)
+        super().__init__(
+            geometry=geometry,
+            shell_dict=shell_dict,
+            path_to_skf=path_to_skf,
+            repulsive=repulsive,
+            skf_type=skf_type,
+            basis_type=basis_type,
+            periodic=periodic,
+            mixer=mixer,
+            **kwargs)
         super().init_dftb(**kwargs)
-        self.converge_number = []
 
-    def __call__(self,
-                 charge: Tensor = None,  # -> Initial charge
-                 geometry: Geometry = None,  # Update Geometry
-                 hamiltonian: Tensor = None,
-                 overlap: Tensor = None,
-                 **kwargs):
+    def forward(
+            self,
+            charge: Tensor = None,  # -> Initial charge
+            geometry: Geometry = None,  # Update Geometry
+            hamiltonian: Tensor = None,
+            overlap: Tensor = None,
+            **kwargs):
         """Perform SCC-DFTB calculation."""
+        self.converge_number = []
         self.mixer = globals()[self.mixer_type](self.qzero, return_convergence=True)
         self.shift = self._get_shift()
 
@@ -425,6 +446,7 @@ class Dftb2(Dftb):
     def _single_loop(self, iiter):
         """Perform each single SCC-DFTB loop."""
         # get shift and repeat shift according to number of orbitals
+        self.atm_size = torch.max(self.geometry.n_atoms[self.mask])
         shift_ = self._update_shift()
         shiftorb_ = pack([ishif.repeat_interleave(iorb) for iorb, ishif in
                           zip(self.atom_orbitals[self.mask], shift_)])
@@ -457,7 +479,7 @@ class Dftb2(Dftb):
                 0.5 * overlap * _shift_mat
 
             # single loop SCC-DFTB calculation
-            self.qm = super().__call__(self.hamiltonian, overlap, iiter)
+            self.qm = super().forward(self.hamiltonian, overlap, iiter)
             self.qmix, _mask = self.mixer(self.qm)
             self._charge[self.mask] = self.qmix
             self._density[self.mask, :self.rho.shape[1], :self.rho.shape[2]] = self.rho
