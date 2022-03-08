@@ -117,6 +117,10 @@ length_units: Dict[str, float] = {
     'au': 1.0
 }
 
+length_angstrom_units: Dict[str, float] = {
+    'angstrom': 1.0, 'bohr': _Bohr__AA, 'au': _Bohr__AA
+}
+
 # Conversion factors for dipole units
 dipole_units: Dict[str, float] = {
     'cm': _Coulomb__au * 1.0e10 * _AA__Bohr,

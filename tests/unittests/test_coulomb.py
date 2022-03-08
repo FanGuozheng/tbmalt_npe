@@ -27,7 +27,7 @@ def test_get_alpha_batch():
               torch.tensor([[0, 8., 0], [4., 0, 0], [0, 0, 4.]])]
     positions = torch.tensor([[[0, 0, 0], [0, 2., 0]], [[0, 0, 0], [0, 2., 0]]])
     atompair = [torch.tensor([1, 1]), torch.tensor([1, 1])]
-    geo = Geometry(atompair, positions, latvec)
+    geo = Geometry(atompair, positions, latvec, unit='angstrom')
     periodic = Periodic(geo, geo.cell, cutoff=10.)
     coulomb = Coulomb(geo, periodic)
     print(coulomb.alpha, alpha_batch_from_dftbplus)

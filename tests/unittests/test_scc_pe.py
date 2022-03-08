@@ -12,38 +12,34 @@ shell_dict = {1: [0], 6: [0, 1], 7: [0, 1], 8: [0, 1],
 
 
 def test_h2_pe(device):
-    """Test SCC DFTB for ch4 with periodic boundary condition."""
+    """Test SCC DFTB for H2 with periodic boundary condition."""
     h2 = molecule('H2')
     h2.cell = [6.0, 6.0, 6.0]
     kpoints = torch.tensor([1, 1, 1])
     geometry = Geometry.from_ase_atoms([h2])
-    path_to_skf = './tests/unittests/data/slko/mio'
+    path_to_skf = './data/slko/mio'
 
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf', kpoints=kpoints)
+    dftb1 = Dftb1(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
+    dftb1()
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
     dftb2()
 
-    assert torch.max(abs(dftb2.charge - torch.tensor([[1.0, 1.0]]))) < 1E-14
+    assert torch.max(abs(dftb1.charge - torch.tensor([[1.0, 1.0]]))) < 1E-14, \
+        'DFTB1 charge tolerance error'
+    assert torch.max(abs(dftb2.charge - torch.tensor([[1.0, 1.0]]))) < 1E-14, \
+        'DFTB2 charge tolerance error'
 
     kpoints2 = torch.tensor([2, 2, 2])
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
                   path_to_skf=path_to_skf, skf_type='skf', kpoints=kpoints2)
-
-
-def test_h2o_pe(device):
-    """Test H2O DFTB from ase input."""
-    h2o = molecule('H2O')
-    h2o.cell = [6.0, 6.0, 6.0]
-    kpoints = torch.tensor([1, 1, 1])
-    geometry = Geometry.from_ase_atoms([h2o])
-    path_to_skf = './tests/unittests/data/slko/mio'
-
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf', kpoints=kpoints)
-    dftb2()
-
-    assert torch.max(abs(dftb2.charge - torch.tensor(
-        [[6.59150660, 0.70424670, 0.70424670]]))) < 5E-9
 
 
 @pytest.mark.skip(reason="Test SKF input too huge.")
@@ -72,16 +68,23 @@ def test_ch4_pe(device):
     kpoints = torch.tensor([1, 1, 1])
     geometry = Geometry.from_ase_atoms([ch4])
     path_to_skf = './tests/unittests/data/slko/mio'
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict, path_to_skf=path_to_skf,
-                  skf_type='skf')
 
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict, path_to_skf=path_to_skf,
-                  skf_type='skf', kpoints=kpoints)
+    # dftb1 = Dftb1(geometry=geometry,
+    #               shell_dict=shell_dict,
+    #               path_to_skf=path_to_skf,
+    #               skf_type='skf',
+    #               kpoints=kpoints)
+    # dftb1()
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
     dftb2()
 
     assert torch.max(abs(dftb2.charge - torch.tensor([[
         4.305475062065351, 0.923631234483662, 0.923631234483662,
-         0.923631234483662, 0.923631234483662]]))) < 1E-9
+        0.923631234483662, 0.923631234483662]]))) < 1E-9, 'tolerance error'
 
 
 def test_c2h6_pe(device):
@@ -91,43 +94,73 @@ def test_c2h6_pe(device):
     kpoints = torch.tensor([1, 1, 1])
     geometry = Geometry.from_ase_atoms([c2h6])
     path_to_skf = './tests/unittests/data/slko/mio'
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf')
-    dftb2()
 
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf', kpoints=kpoints)
+    # Non-SCC
+    dftb1 = Dftb1(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf')
+    dftb1()
+    dftb1_pe = Dftb1(geometry=geometry,
+                     shell_dict=shell_dict,
+                     path_to_skf=path_to_skf,
+                     skf_type='skf',
+                     kpoints=kpoints)
+    dftb1_pe()
+
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
+    dftb2()
 
 
 def test_pe_batch(device):
     """Test SCC DFTB for c2h6 with periodic boundary condition."""
+    path_to_skf = './data/slko/mio'
     ch4 = molecule('CH4')
-    ch4.cell = [6.0, 6.0, 6.0]
+    h2o = molecule('H2O')
     c2h6 = molecule('C2H6')
+
+    geometry = Geometry.from_ase_atoms([h2o, ch4, c2h6])
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf')
+    dftb2()
+    print(dftb2.__class__.__dict__.keys())
+
+    ch4.cell = [6.0, 6.0, 6.0]
     c2h6.cell = [6.0, 6.0, 6.0]
-    h2o = molecule('C2H6')
     h2o.cell = [6.0, 6.0, 6.0]
     kpoints = torch.tensor([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
     geometry = Geometry.from_ase_atoms([h2o, ch4, c2h6])
-    path_to_skf = './tests/unittests/data/slko/mio'
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict, path_to_skf=path_to_skf,
-                  skf_type='skf')
+    dftb1 = Dftb1(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
+    # dftb1()
 
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict, path_to_skf=path_to_skf,
-                  skf_type='skf', kpoints=kpoints)
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  kpoints=kpoints)
+
     dftb2()
+    print('fermi', dftb2.fermi, dftb2.H0_energy)
 
     # assert torch.max(abs(dftb2.charge - torch.tensor([[
     #     4.305475062065351, 0.923631234483662, 0.923631234483662,
-    #      0.923631234483662, 0.923631234483662]]))) < 1E-9
+    #       0.923631234483662, 0.923631234483662]]))) < 1E-9
 
 
 def test_si_pe(device):
     """Test SCC DFTB for c2h6 with periodic boundary condition."""
-    hr_pe5 = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat.pe5', device)
-    sr_pe5 = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat.pe5', device)
-    band = read_band('./tests/unittests/data/sk/si/band.out')
-    bandd = read_band('./tests/unittests/data/sk/si/band.out.d')
+    band = read_band('./data/sk/si/band.out')
+    bandd = read_band('./data/sk/si/band.out.d')
 
     geometry = Geometry(
         torch.tensor([[14, 14]]),
@@ -136,23 +169,40 @@ def test_si_pe(device):
             [2.713546, 2.713546, 0.0], [0.0, 2.713546, 2.713546],
             [2.713546, 0.0, 2.713546]]]),
         units='angstrom')
-    klines = torch.tensor([[0.5, 0.5, -0.5, 0], [0, 0, 0, 11],
-                           [0, 0, 0.5, 11], [0.25, 0.25, 0.25, 11]])
-    path_to_skf = './tests/unittests/data/slko'
-    dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf', klines=klines)
+    klines = torch.tensor([[0.5, 0.5, -0.5, 0, 0, 0, 10],
+                           [0, 0, 0, 0, 0.5, 0.25, 10],
+                           [0, 0.5, 0.25, 0.25, 0.25, 0.25, 10]])
+    path_to_skf = './data/slko'
+    dftb2 = Dftb2(geometry=geometry,
+                  shell_dict=shell_dict,
+                  path_to_skf=path_to_skf,
+                  skf_type='skf',
+                  klines=klines)
     dftb2()
 
     shell_dict.update({14: [0, 1, 2]})
-    dftb2d = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='skf', klines=klines)
+    dftb2d = Dftb2(geometry=geometry,
+                   shell_dict=shell_dict,
+                   path_to_skf=path_to_skf,
+                   skf_type='skf',
+                   klines=klines)
     dftb2d()
-    check_band = torch.max(abs(dftb2.eigenvalue.squeeze() - band)) < 1E-8
+    check_band = torch.max(abs(dftb2.eigenvalue.squeeze() - band)) < 1E-3
     check_bandd = torch.max(abs(dftb2d.eigenvalue.squeeze() - bandd)) < 1E-7
     dftb2d = Dftb2(geometry, shell_dict=shell_dict, interpolation='Spline1d',
-                  path_to_skf=path_to_skf, skf_type='skf', klines=klines)
+                   path_to_skf=path_to_skf, skf_type='skf', klines=klines)
     dftb2d()
-
+    print(dftb2d.fermi, dftb2d.qzero, dftb2d.H0_energy.sum(-1),
+          dftb2d.coulomb_energy)
+    import matplotlib.pyplot as plt
+    plt.plot(torch.arange(len(dftb2d.eigenvalue.squeeze())),
+             dftb2d.eigenvalue.squeeze(), 'r')
+    plt.plot(torch.arange(len(bandd)), bandd, 'g')
+    plt.ylim(-5, 5)
+    plt.show()
+    print('dftb2.eigenvalue.squeeze() - band', bandd.shape,
+          torch.max(abs(dftb2d.eigenvalue.squeeze() - bandd)),
+          torch.max(abs(dftb2.eigenvalue.squeeze() - band)))
     assert check_band
     assert check_bandd
 
@@ -160,6 +210,11 @@ def test_si_pe(device):
 def test_band_batch(device):
     """Test SCC DFTB for c2h6 with periodic boundary condition."""
 
+
 def _get_matrix(filename, device):
     """Read DFTB+ hamsqr1.dat and oversqr.dat."""
     return torch.from_numpy(np.loadtxt(filename)).to(device)
+
+
+if __name__ == '__main__':
+    test_si_pe(torch.device('cpu'))

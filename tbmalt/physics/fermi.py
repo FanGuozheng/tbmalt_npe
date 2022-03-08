@@ -10,6 +10,8 @@ from torch import Tensor
 import torch.nn.functional as F
 from tbmalt.common.batch import pack
 
+
+@torch.no_grad()
 def fermi(eigenvalue: Tensor, nelectron: Tensor, kT=0.):
     """Fermi-Dirac distributions without smearing.
     Arguments:

@@ -179,6 +179,7 @@ class Geometry:
         """Chemical symbols of the atoms present."""
         return batch_chemical_symbols(self.atomic_numbers)
 
+    @property
     def unique_atomic_numbers(self) -> Tensor:
         """Identifies and returns a tensor of unique atomic numbers.
 
@@ -475,7 +476,7 @@ def unique_atom_pairs(geometry: Optional[Geometry] = None,
         unique_atom_pairs: A tensor specifying all unique atom pairs.
     """
     if geometry is not None:
-        uan = geometry.unique_atomic_numbers()
+        uan = geometry.unique_atomic_numbers
     elif unique_atomic_numbers is not None:
         uan = unique_atomic_numbers
     else:

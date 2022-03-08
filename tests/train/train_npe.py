@@ -8,13 +8,12 @@ import torch
 from torch import Tensor
 from ase.build import molecule
 
-from tbmalt.structures.geometry import Geometry
+from tbmalt import Geometry, Shell
 from tbmalt.ml.optim import OptHs, OptVcr, OptTvcr
 from tbmalt.common.parameter import params
 from tbmalt.io.hdf import LoadHdf
 from tbmalt.physics.dftb.dftb import Dftb2
 from tbmalt.ml.skfeeds import SkfFeed
-from tbmalt.structures.basis import Basis
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
 
 torch.set_printoptions(15)
@@ -30,14 +29,15 @@ device = torch.device('cpu')
 ###################
 # optimize params #
 ###################
-size_opt = 30
-params['ml']['task'] = 'vcr'
+size_opt = 12
+params['ml']['task'] = 'tvcr'
 params['ml']['compression_radii_min'] = 2.0
 params['ml']['compression_radii_max'] = 9.0
-dataset_aims = './dataset/aims_2000_03.hdf'
-dataset_dftb = './dataset/scc_2000_03.hdf'
-params['ml']['targets'] = ['charge']  # charge, dipole, gap, cpa, homo_lumo
-params['ml']['max_steps'] = 12
+dataset_aims = './dataset/aims_6000_01.hdf'
+dataset_dftb = './dataset/scc_6000_01.hdf'
+params['ml']['targets'] = ['dipole']  # charge, dipole, gap, cpa, homo_lumo
+train_onsite = True
+params['ml']['max_steps'] = 120
 h_compr_feed = True
 s_compr_feed = True
 global_r = False
@@ -47,7 +47,7 @@ params['ml']['charge_weight'], params['ml']['dipole_weight'] = 1.0, 1.0
 ##################
 # predict params #
 ##################
-dataset_pred, size_pred = './dataset/aims_10000_03.hdf', 1000
+dataset_pred, size_pred = './dataset/aims_10000_03.hdf', 10
 params['ml']['ml_method'] = 'linear'  # nn, linear, random_forest
 aims_property = ['charge', 'dipole', 'homo_lumo', 'hirshfeld_volume_ratio']
 dftb_property = ['charge', 'dipole', 'homo_lumo']
@@ -68,7 +68,8 @@ def optimize(dataset_ref, size, dataset_dftb=None, **kwargs):
         'charge', 'dipole', 'hirshfeld_volume_ratio'])
     data_ref['cpa'] = data_ref['hirshfeld_volume_ratio']
     if dataset_dftb is not None:
-        geo_dftb, data_dftb = _load_ref(dataset_dftb, size, ['charge', 'dipole'])
+        geo_dftb, data_dftb = _load_ref(
+            dataset_dftb, size, ['charge', 'dipole'])
 
     # optimize integrals with spline parameters
     if params['ml']['task'] == 'mlIntegral':
@@ -97,8 +98,9 @@ def optimize(dataset_ref, size, dataset_dftb=None, **kwargs):
     elif params['ml']['task'] == 'tvcr':
         params['dftb']['path_to_skf'] = './tvcr.h5'
         opt = OptTvcr(geo_opt, data_ref, params, tvcr, shell_dict,
-                     h_compr_feed=h_compr_feed, s_compr_feed=s_compr_feed,
-                     interpolation='BSpline', global_r=global_r)
+                      h_compr_feed=h_compr_feed, s_compr_feed=s_compr_feed,
+                      train_onsite=train_onsite,
+                      interpolation='BSpline', global_r=global_r)
         dftb = opt(break_tolerance=break_tolerance)
         print('compr', opt.compr)
 
@@ -110,9 +112,17 @@ def optimize(dataset_ref, size, dataset_dftb=None, **kwargs):
         dftb_mio = _cal_cpa(geo_opt, params, path='../unittests/slko/mio-1-1/')
         _plot(data_ref['cpa'], dftb.cpa, dftb_mio.cpa, 'cpa')
 
-    params['ml']['targets'] = ['charge', 'dipole']
+    # Plot charge and dipole in any cases
+    for target in ['charge', 'dipole']:
+        if target not in params['ml']['targets']:
+            params['ml']['targets'].append(target)
     for target in params['ml']['targets']:
-        _plot(data_ref[target], getattr(dftb, target), data_dftb[target], target)
+        _plot(data_ref[target], getattr(
+            dftb, target), data_dftb[target], target)
+        if target == 'charge':
+            qzero = getattr(dftb, 'qzero')
+            _plot(data_ref[target] - qzero, getattr(
+                dftb, target) - qzero, data_dftb[target] - qzero, 'delta_q')
 
 
 def predict(pickle_file: str, dataset: str, size: int, **kwargs):
@@ -131,7 +141,8 @@ def predict(pickle_file: str, dataset: str, size: int, **kwargs):
     dftb = loaded_model.predict(geo_aims)
 
     for target in params['ml']['targets']:
-        _plot(data_aims[target], getattr(dftb, target), data_dftb[target], target)
+        _plot(data_aims[target], getattr(
+            dftb, target), data_dftb[target], target)
 
 
 def _load_ref(dataset, size, properties, units='angstrom', **kwargs):
@@ -145,7 +156,7 @@ def _load_ref(dataset, size, properties, units='angstrom', **kwargs):
 
 
 def _cal_cpa(geometry, parameter, path):
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
     h_feed, s_feed = SkfFeed.from_dir(
         path, shell_dict, geometry,
         interpolation='PolyInterpU', h_feed=True, s_feed=True)

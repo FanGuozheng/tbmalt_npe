@@ -11,7 +11,7 @@ from dscribe.descriptors import ACSF
 from ase.build import molecule
 from torch import Tensor
 from tbmalt.ml import Acsf
-from tbmalt import Geometry, Basis
+from tbmalt import Geometry, Shell
 from tbmalt.structures.periodic import Periodic
 from tbmalt.data.elements import chemical_symbols
 from tbmalt.common.batch import pack
@@ -19,12 +19,6 @@ from tbmalt.data.units import length_units
 
 # Set some global parameters which only used here
 torch.set_default_dtype(torch.float64)
-ch4 = molecule('CH4')
-nh3 = molecule('NH3')
-h2o = molecule('H2O')
-h2o2 = molecule('H2O2')
-h2 = molecule('H2')
-cho = molecule('CH3CHO')
 shell_dict = {1: [0], 6: [0, 1], 7: [0, 1], 8: [0, 1]}
 _electronnegativity = {1: torch.tensor([2.2]), 6: torch.tensor([2.55]),
                        7: torch.tensor([3.04]), 8: torch.tensor([3.44])}
@@ -42,9 +36,14 @@ class AcsfTest(Acsf):
                  g5_params: Optional[Tensor] = None,
                  unit: Literal['bohr', 'angstrom'] = 'bohr',
                  element_resolve: Optional[bool] = True,
-                 atom_like: Optional[bool] = False):
-        super().__init__(geometry, basis, shell_dict,
-                         g1_params, unit, element_resolve, atom_like)
+                 form: str = 'atom'):
+        super().__init__(geometry=geometry,
+                         basis=basis,
+                         shell_dict=shell_dict,
+                         g1_params=g1_params,
+                         unit=unit,
+                         element_resolve=element_resolve,
+                         form=form)
 
     def __call__(self,
                  g1_params: Optional[Tensor] = None,
@@ -63,7 +62,6 @@ class AcsfTest(Acsf):
         if g5_params is not None:
             _g, self.g5 = self.g5(_g, g5_params)
 
-
         # if atom_like is True, return g in batch with atom_like, else return
         # g, which the first dimension equals to the size of all atoms in batch
         if self.form == 'atom':
@@ -80,7 +78,8 @@ class AcsfTest(Acsf):
         dist = self.distances / length_units['angstrom']
 
         fc = self.fc
-        _g4 = torch.zeros(batch, *dist.squeeze().shape, dist.squeeze().shape[-1])
+        _g4 = torch.zeros(batch, *dist.squeeze().shape,
+                          dist.squeeze().shape[-1])
         d_vect = d_vect.squeeze()
         dist = dist.squeeze()
         fc = self.fc.squeeze()
@@ -120,7 +119,8 @@ class AcsfTest(Acsf):
         dist = self.distances / length_units['angstrom']
 
         fc = self.fc
-        _g5 = torch.zeros(batch, *dist.squeeze().shape, dist.squeeze().shape[-1])
+        _g5 = torch.zeros(batch, *dist.squeeze().shape,
+                          dist.squeeze().shape[-1])
         d_vect = d_vect.squeeze()
         dist = dist.squeeze()
         fc = self.fc.squeeze()
@@ -148,14 +148,21 @@ class AcsfTest(Acsf):
 
 def test_single_g1(device):
     """Test G1 values in single geometry."""
+    # Test element_resolve
+    # Test PBC conditions
     rcut = 6.0
+    ch4 = molecule('CH4')
 
-    # 1. Molecule test
+    # 1.1 Molecule test element resolve
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
-    acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
-                element_resolve=True)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                element_resolve=True,
+                unit='angstrom')
     acsf()
 
     # Get reference
@@ -164,18 +171,29 @@ def test_single_g1(device):
 
     assert torch.max(abs(acsf_t_g - acsf.g)) < 1E-6, 'tolerance check'
 
-    acsf_sum = Acsf(geo, basis, shell_dict, g1_params=rcut,
-                    element_resolve=False)
+    # 1.2 element unresolved
+    acsf_sum = Acsf(geometry=geo,
+                    basis=basis,
+                    shell_dict=shell_dict,
+                    g1_params=rcut,
+                    element_resolve=False,
+                    unit='angstrom')
     acsf_sum()
     assert torch.max(abs(acsf_t_g.sum(-1) - acsf_sum.g)) < 1E-6
 
     # 2. Periodic system test
-    ch4.cell = [1, 3, 3]
+    ch4.cell = [3, 3, 3]
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
-    acsfp = Acsf(geo, basis, shell_dict, g1_params=rcut,
-                 element_resolve=True)
+    periodic = Periodic(geometry=geo, latvec=geo.cell, cutoff=rcut)
+    acsfp = Acsf(geometry=geo,
+                 basis=basis,
+                 shell_dict=shell_dict,
+                 g1_params=rcut,
+                 element_resolve=True,
+                 periodic=periodic,
+                 unit='angstrom')
     acsfp()
 
     # Get reference
@@ -186,10 +204,18 @@ def test_single_g1(device):
 def test_batch_g1(device):
     """Test G1 values in batch geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+    h2o = molecule('H2O')
+
     geo = Geometry.from_ase_atoms([ch4, h2o])
-    basis = Basis(geo.atomic_numbers, shell_dict)
-    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers()]
-    acsf = Acsf(geo, basis, shell_dict, g1_params=rcut)
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers]
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                element_resolve=True,
+                unit='angstrom')
     acsf()
 
     # get reference
@@ -211,11 +237,18 @@ def test_batch_g1(device):
 def test_single_g2(device):
     """Test G2 values in single geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
-    acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
-                g2_params=torch.tensor([0.5, 1.0]), element_resolve=True)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=torch.tensor([0.5, 1.0]),
+                element_resolve=True,
+                unit='angstrom')
     acsf()
 
     # get reference
@@ -229,9 +262,12 @@ def test_single_g2(device):
 def test_batch_g2(device):
     """Test G2 values in batch geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+    h2o = molecule('H2O')
+
     geo = Geometry.from_ase_atoms([ch4, h2o])
-    basis = Basis(geo.atomic_numbers, shell_dict)
-    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers()]
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers]
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
                 g2_params=torch.tensor([0.5, 1.0]),
                 element_resolve=True, form='atom')
@@ -249,8 +285,10 @@ def test_batch_g2(device):
 def test_single_g3(device):
     """Test G3 values in single geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
                 g3_params=torch.tensor([1.0]),
@@ -268,32 +306,37 @@ def test_single_g3(device):
 def test_batch_g3(device):
     """Test G3 values in batch geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+    h2o = molecule('H2O')
+
     geo = Geometry.from_ase_atoms([ch4, h2o])
-    basis = Basis(geo.atomic_numbers, shell_dict)
-    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers()]
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    species = [chemical_symbols[ii] for ii in geo.unique_atomic_numbers]
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
                 g3_params=torch.tensor([1.0]),
                 element_resolve=True, atom_like=False)
-    g = acsf()
+    acsf()
 
     # get reference
-    acsf_d = ACSF(species=species, rcut=rcut, g3_params=[ 1.0])
+    acsf_d = ACSF(species=species, rcut=rcut, g3_params=[1.0])
     acsf_d = pack([torch.from_numpy(ii) for ii in acsf_d.create([ch4, h2o])])
 
     # switch last dimension due to the orders of atom specie difference
     assert torch.max(abs(acsf_d[..., :4][geo.atomic_numbers.ne(0)] -
-                         g[..., [0, 3, 1, 4]])) < 1E-6, 'tolerance check'
+                         acsf.g[..., [0, 3, 1, 4]])) < 1E-6, 'tolerance check'
 
 
 def test_single_g4(device):
     """Test G4 values in single geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut, g4_params=torch.tensor(
         [[0.02, 1.0, -1.0]]), element_resolve=True, form='form')
-    g = acsf()
+    acsf()
 
     acsf_t = AcsfTest(geo, basis, shell_dict, g1_params=rcut)
     acsf_t(g4_params=torch.tensor([0.02, 1.0, -1.0]))
@@ -301,18 +344,19 @@ def test_single_g4(device):
     acsf_d = ACSF(species=species, rcut=rcut, g4_params=[[0.02, 1.0, -1.0]])
     acsf_d_g4 = torch.from_numpy(acsf_d.create(ch4))
 
-    assert torch.max(abs(acsf_d_g4 - g)) < 1E-6, 'tolerance check'
+    assert torch.max(abs(acsf_d_g4 - acsf.g)) < 1E-6, 'tolerance check'
 
 
 def test_cho_g4(device):
     """Test G4 values in single geometry."""
     rcut = 6.0
+    cho = molecule('CH3CHO')
     geo = Geometry.from_ase_atoms(cho)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut, g4_params=torch.tensor(
         [[0.02, 1.0, -1.0]]), element_resolve=True)
-    g = acsf()
+    acsf()
 
     acsf_t = AcsfTest(geo, basis, shell_dict, g1_params=rcut,
                       element_resolve=True)
@@ -321,36 +365,44 @@ def test_cho_g4(device):
     acsf_d = ACSF(species=species, rcut=rcut, g4_params=[[0.02, 1.0, -1.0]])
     acsf_d_g4 = torch.from_numpy(acsf_d.create(cho))
 
-    assert torch.max(abs(
-        acsf_d_g4[:, 2:].sum(-1) - g[:, 2:].sum(-1))) < 1E-6, 'tolerance check'
+    assert torch.max(abs(acsf_d_g4[:, 2:].sum(-1) -
+                         acsf.g[:, 2:].sum(-1))) < 1E-6, 'tolerance check'
 
 
 def test_batch_g4(device):
     """Test G4 values in batch geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+    h2o = molecule('H2O')
+    cho = molecule('CH3CHO')
+
     geo = Geometry.from_ase_atoms([ch4, h2o, cho])
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut, g4_params=torch.tensor(
         [[0.02, 1.0, -1.0]]), element_resolve=True, form='atom')
-    g = acsf()
+    acsf()
 
-    acsf_d = ACSF(species=geo.unique_atomic_numbers().numpy(), rcut=rcut,
+    acsf_d = ACSF(species=geo.unique_atomic_numbers.numpy(), rcut=rcut,
                   g4_params=[[0.02, 1.0, -1.0]])
     acsf_d_g4 = pack([torch.from_numpy(acsf_d.create(ch4)),
                       torch.from_numpy(acsf_d.create(h2o)),
                       torch.from_numpy(acsf_d.create(cho))])
 
     assert torch.max(abs(acsf_d_g4[..., 2:][geo.atomic_numbers.ne(0)].sum(-1) -
-                         g[..., 2:].sum(-1))) < 1E-6, 'tolerance check'
+                         acsf.g[..., 2:].sum(-1))) < 1E-6, 'tolerance check'
 
 
 def test_single_g5(device):
     """Test G5 values in single geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
     geo = Geometry.from_ase_atoms(ch4)
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     species = geo.chemical_symbols
-    acsf = Acsf(geo, basis, shell_dict, g1_params=rcut,
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
                 g5_params=torch.tensor([[0.02, 1.0, -1.0]]),
                 element_resolve=True)
     acsf()
@@ -359,69 +411,184 @@ def test_single_g5(device):
     acsf_d = ACSF(species=species, rcut=rcut, g5_params=[[0.02, 1.0, -1.0]])
     acsf_d_g5 = torch.from_numpy(acsf_d.create(ch4))
 
-    assert torch.max(abs(acsf_d_g5[..., 2:].sum(-1) - acsf.g[..., 2:].sum(-1))) < 1E-6
+    assert torch.max(
+        abs(acsf_d_g5[..., 2:].sum(-1) - acsf.g[..., 2:].sum(-1))) < 1E-6
 
 
 def test_batch_g5(device):
     """Test G5 values in batch geometry."""
     rcut = 6.0
+    ch4 = molecule('CH4')
+    h2o = molecule('H2O')
+    cho = molecule('CH3CHO')
     geo = Geometry.from_ase_atoms([ch4, h2o, cho])
-    basis = Basis(geo.atomic_numbers, shell_dict)
+    basis = Shell(geo.atomic_numbers, shell_dict)
     acsf = Acsf(geo, basis, shell_dict, g1_params=rcut, g5_params=torch.tensor(
         [[0.02, 1.0, -1.0]]), element_resolve=True, form='atom')
-    g = acsf()
-
-    acsf_d = ACSF(species=geo.unique_atomic_numbers().numpy(), rcut=rcut,
-                  g5_params=[[0.02, 1.0, -1.0]])
-    acsf_d_g5 = pack([torch.from_numpy(acsf_d.create(ch4)),
-                      torch.from_numpy(acsf_d.create(h2o)),
-                      torch.from_numpy(acsf_d.create(cho))])
-
-    assert torch.max(abs(acsf_d_g5[..., 2:][geo.atomic_numbers.ne(0)].sum(-1) -
-                         g[..., 2:].sum(-1))) < 1E-6, 'tolerance check'
-
-
-def test_batch_g5_pe(device):
-    """Test G5 values in batch geometry."""
-    rcut = 6.0
-    ch4.cell = [6, 6, 6]
-    h2o.cell = [6, 6, 6]
-    cho.cell = [6, 6, 6]
-    geo = Geometry.from_ase_atoms([ch4, h2o, cho])
-    periodic = Periodic(geo, geo.cell, 10.0)
-    print(geo.isperiodic)
-    basis = Basis(geo.atomic_numbers, shell_dict)
-    acsf = Acsf(periodic, basis, shell_dict, g1_params=rcut, g5_params=torch.tensor(
-        [[0.02, 1.0, -1.0]]), element_resolve=True, form='atom')
-    g = acsf()
-
-    acsf_d = ACSF(species=geo.unique_atomic_numbers().numpy(), rcut=rcut,
-                  g5_params=[[0.02, 1.0, -1.0]])
-    acsf_d_g5 = pack([torch.from_numpy(acsf_d.create(ch4)),
-                      torch.from_numpy(acsf_d.create(h2o)),
-                      torch.from_numpy(acsf_d.create(cho))])
-
-    assert torch.max(abs(acsf_d_g5[..., 2:][geo.atomic_numbers.ne(0)].sum(-1) -
-                         g[..., 2:].sum(-1))) < 1E-6, 'tolerance check'
-
-
-def test_batch(device):
-    """Test G4 values in batch geometry."""
-    rcut = 6.0
-    g2_params=torch.tensor([0.5, 1.0])
-    g4_params=torch.tensor(
-        [[0.02, 1.0, -1.0]])
-    geo = Geometry.from_ase_atoms([ch4, h2o])
-    basis = Basis(geo.atomic_numbers, shell_dict)
-    acsf = Acsf(geo, basis, shell_dict, g1_params=rcut, g2_params=g2_params,
-                g4_params=g4_params, element_resolve=True)
     acsf()
 
-    acsf_d = ACSF(species=geo.unique_atomic_numbers().numpy(), rcut=rcut,
+    acsf_d = ACSF(species=geo.unique_atomic_numbers.numpy(), rcut=rcut,
+                  g5_params=[[0.02, 1.0, -1.0]])
+    acsf_d_g5 = pack([torch.from_numpy(acsf_d.create(ch4)),
+                      torch.from_numpy(acsf_d.create(h2o)),
+                      torch.from_numpy(acsf_d.create(cho))])
+
+    assert torch.max(abs(acsf_d_g5[..., 2:][geo.atomic_numbers.ne(0)].sum(-1) -
+                         acsf.g[..., 2:].sum(-1))) < 1E-6, 'tolerance check'
+
+    ch4.cell = [4, 4, 4]
+    h2o.cell = [4, 4, 4]
+    cho.cell = [4, 4, 4]
+    geo = Geometry.from_ase_atoms([ch4, h2o, cho])
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    periodic = Periodic(geometry=geo, latvec=geo.cell, cutoff=rcut)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g5_params=torch.tensor([[0.02, 1.0, -1.0]]),
+                element_resolve=True,
+                form='distance',
+                periodic=periodic)
+    acsf()
+
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g5_params=torch.tensor([[0.02, 1.0, -1.0]]),
+                element_resolve=True,
+                form='geometry',
+                periodic=periodic)
+    acsf()
+
+    print(acsf.g.shape)
+
+
+def test_single_form(device):
+    """Test different form for single system."""
+    h2o = molecule('H2O')
+    rcut = 6.0
+    g2_params = torch.tensor([0.5, 1.0])
+    g4_params = torch.tensor([[0.02, 1.0, -1.0]])
+    geo = Geometry.from_ase_atoms(h2o)
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                unit='angstrom',
+                form='atom')
+    acsf()
+    acsf_d = ACSF(species=geo.unique_atomic_numbers.numpy(), rcut=rcut,
+                  g2_params=[[0.5, 1.0]], g4_params=[[0.02, 1.0, -1.0]])
+    acsf_d_g = torch.from_numpy(acsf_d.create(h2o))
+
+    assert torch.max(abs(acsf.g.sum(-1) - acsf_d_g.sum(-1))) < 1E-6, \
+        'tolerance error'
+
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                unit='angstrom',
+                form='geometry')
+    acsf()
+    assert torch.max(abs(acsf.g[0].sum(-1) - acsf_d_g.sum(-1))) < 1E-6, \
+        'tolerance error'
+
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                unit='angstrom',
+                form='distance')
+    acsf()
+    assert torch.max(abs(acsf.g[0].sum(-1).sum(-1) -
+                         acsf_d_g.sum(-1))) < 1E-6, 'tolerance error'
+
+
+def test_single_form_pe(device):
+    """Test different form for single system."""
+    rcut = 6.0
+    h2o = molecule('H2O')
+    h2o.cell = [4, 4, 4]
+    g2_params = torch.tensor([0.5, 1.0])
+    g4_params = torch.tensor([[0.02, 1.0, -1.0]])
+    geo = Geometry.from_ase_atoms(h2o)
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    periodic = Periodic(geometry=geo, latvec=geo.cell, cutoff=rcut)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                unit='angstrom',
+                form='atom',
+                periodic=periodic)
+    acsf()
+    acsf_d = ACSF(species=geo.unique_atomic_numbers.numpy(), rcut=rcut,
+                  g2_params=[[0.5, 1.0]], g4_params=[[0.02, 1.0, -1.0]])
+    acsf_d_g = torch.from_numpy(acsf_d.create(h2o))
+
+    rcut = 6.0
+    h2o.cell = [4, 4, 4]
+    g2_params = torch.tensor([0.5, 1.0])
+    g4_params = torch.tensor([[0.02, 1.0, -1.0]])
+    geo = Geometry.from_ase_atoms(h2o)
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    periodic = Periodic(geometry=geo, latvec=geo.cell, cutoff=rcut)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                unit='angstrom',
+                form='geometry',
+                periodic=periodic)
+    acsf()
+    print(acsf.g.sum(1))
+    print(acsf_d_g)
+
+
+def test_batch_pe(device):
+    """Test different form for batch system."""
+    rcut = 6.0
+    h2o = molecule('H2O')
+    ch4 = molecule('CH4')
+    g2_params = torch.tensor([0.5, 1.0])
+    g4_params = torch.tensor([[0.02, 1.0, -1.0]])
+    geo = Geometry.from_ase_atoms([ch4, h2o])
+    basis = Shell(geo.atomic_numbers, shell_dict)
+    acsf = Acsf(geometry=geo,
+                basis=basis,
+                shell_dict=shell_dict,
+                g1_params=rcut,
+                g2_params=g2_params,
+                g4_params=g4_params,
+                element_resolve=True,
+                form='geometry')
+    acsf()
+
+    acsf_d = ACSF(species=geo.unique_atomic_numbers.numpy(), rcut=rcut,
                   g2_params=[[0.5, 1.0]], g4_params=[[0.02, 1.0, -1.0]])
     acsf_d_g4 = pack([torch.from_numpy(acsf_d.create(ch4)),
                       torch.from_numpy(acsf_d.create(h2o))])
+    print(acsf.g.shape, 'acsf_d_g4', acsf_d_g4.shape)
 
 
 if __name__ == '__main__':
-    test_batch_g5_pe(torch.device('cpu'))
+    test_batch_g5(torch.device('cpu'))

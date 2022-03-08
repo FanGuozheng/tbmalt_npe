@@ -74,7 +74,10 @@ class Periodic:
         # Remove cell where all atoms are beyond cutoff
         if return_distance is True:
             self.positions_vec, self.periodic_distances = self._periodic_distance()
-            self.neighbour_vec, self.neighbour_dis, self.ncell = self._neighbourlist()
+            (self.neighbour_vec,
+             self.neighbour_dis,
+             self.mask_neig,
+             self.ncell) = self._neighbourlist()
 
     def _check(self, latvec, cutoff, **kwargs):
         """Check dimension, type of lattice vector and cutoff."""
@@ -90,7 +93,7 @@ class Periodic:
         if latvec.dim() == 2:
             latvec = latvec.unsqueeze(0)
         elif latvec.dim() != 3:
-            raise ValueError('lattice vector dimension should be 2 or 3')
+            raise ValueError(f'lattice vector dimension should be 2 or 3, get {latvec.dim()}')
 
         if isinstance(cutoff, float):
             cutoff = torch.tensor([cutoff])
@@ -164,10 +167,12 @@ class Periodic:
         positions = self.rcellvec.unsqueeze(2) + self.positions.unsqueeze(1)
         size_system = self.atomic_numbers.ne(0).sum(-1)
         positions_vec = (-positions.unsqueeze(-3) + self.positions.unsqueeze(1).unsqueeze(-2))
-        distance = pack([torch.sqrt(((ipos[:, :inat].repeat(1, inat, 1) - torch.repeat_interleave(
-                        icp[:inat], inat, 0)) ** 2).sum(-1)).reshape(-1, inat, inat)
-                            for ipos, icp, inat in zip(
-                                positions, self.positions, size_system)], value=1e3)
+        distance = pack([torch.sqrt((
+            (ipos[:, :inat].repeat(1, inat, 1) -
+             torch.repeat_interleave(icp[:inat], inat, 0)) ** 2).sum(-1)
+            ).reshape(-1, inat, inat)
+            for ipos, icp, inat in zip(
+                positions, self.positions, size_system)], value=1e3)
 
         return positions_vec, distance
 
@@ -176,10 +181,12 @@ class Periodic:
         _mask = self.neighbour.any(-1).any(-1)
         neighbour_vec = pack([self.positions_vec[ibatch][_mask[ibatch]]
                               for ibatch in range(self.cutoff.size(0))], value=1e3)
-        neighbour_dis = pack([self.periodic_distances[ibatch][_mask[ibatch]]
-                              for ibatch in range(self.cutoff.size(0))], value=1e3)
+        # neighbour_dis = pack([self.periodic_distances[ibatch][_mask[ibatch]]
+        #                       for ibatch in range(self.cutoff.size(0))], value=1e3)
+        neighbour_dis = pack(self.periodic_distances[_mask].split(
+            tuple(_mask.sum(-1).tolist()), 0), value=1e3)
 
-        return neighbour_vec, neighbour_dis, _mask.sum(-1)
+        return neighbour_vec, neighbour_dis, _mask, _mask.sum(-1)
 
     def _inverse_lattice(self):
         """Get inverse lattice vectors."""
@@ -188,8 +195,8 @@ class Periodic:
         _latvec = self.latvec + torch.diag_embed(mask_zero.type(self.latvec.dtype))
 
         # inverse lattice vectors
-        _invlat = torch.transpose(torch.solve(torch.eye(
-            _latvec.shape[-1]), _latvec)[0], -1, -2)
+        _invlat = torch.linalg.solve(_latvec,torch.eye(
+            _latvec.shape[-1]).repeat(_latvec.shape[0], 1, 1)).transpose(-1, -2)
         _invlat[mask_zero] = 0
         return _invlat, mask_zero
 
@@ -250,7 +257,6 @@ class Periodic:
                 _nkx, _nky, _nkz, _nkxz, _kpoints_inv2[..., 1])])
         _z_incr = torch.cat([(torch.arange(iz) * iv).repeat(xy)
                     for iz, xy, iv in zip(_nkz, _nkxy, _kpoints_inv2[..., 2])])
-        # print('base', _x_base, '_x_incr', _x_incr, _nkx, _nkyz, _kpoints_inv2[..., 0])
         all_kpoints = torch.stack([
             pack(torch.split((_x_base + _x_incr).unsqueeze(1), n_ind)),
             pack(torch.split((_y_base + _y_incr).unsqueeze(1), n_ind)),
@@ -284,34 +290,10 @@ class Periodic:
 
         # k_weights = pack(torch.split(torch.ones(_n_kpoints.sum()), tuple(_n_kpoints)))
         # k_weights = k_weights / _n_kpoints.unsqueeze(-1)
-        # print('all_kpoints', all_kpoints)
         # return all_kpoints.squeeze(-1).permute(1, 2, 0), _n_kpoints, k_weights
 
     def _klines(self, klines: Tensor):
-        """K-lines."""
-        # _nklines = klines[..., -1].long()
-        # _n_kpoints = _nklines.sum(-1)
-        # _nklines_flat = _nklines.flatten()
-
-        # # Each K-points baseline (original points) and difference
-        # # original points (for each batch): k0, k0, k1 ... k_N-1
-        # # difference: delta_0_0, delta_1_0, delta_2_1 ... delta_N_N-1
-        # klines_base = torch.cat([
-        #     klines[:, 0, :-1].unsqueeze(1), klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
-        # klines_diff = torch.cat([
-        #     torch.zeros(klines.shape[0], 1, 3),
-        #     klines[:, 1:, :-1] - klines[:, :-1, :-1]], dim=1).reshape(-1, 3)
-
-        # klines_ext = torch.cat([ib + idiff * torch.linspace(
-        #     0., 1., irep).repeat(3, 1).T for ib, idiff, irep in
-        #     zip(klines_base, klines_diff, _nklines_flat)])
-        # klines_ext = pack(torch.split(klines_ext, tuple(_n_kpoints)))
-
-        # # In every single system, each kpoint has the same weight
-        # k_weights = pack([torch.ones(int(nk)) * 1.0 / nk for nk in _n_kpoints])
-
-        # return klines_ext, _n_kpoints, k_weights
-
+        """Generate K-lines."""
         if self._n_batch == 1:
             if klines.dim() == 2:
                 klines = klines.unsqueeze(0)
@@ -319,24 +301,29 @@ class Periodic:
                 raise ValueError(f'klines dims should be 2 or 3, get {klines.dim()}')
         else:
             assert klines.dim() == 3, f'klines dims should be 3, get {klines.dim()}'
+        assert klines.shape[-1] == 7, 'Shape error, for each K-line path, ' + \
+            'last dimension shold include:[kx1, ky1, kz1, kx2, ky2, kz2, N]' + \
+                f'but get {klines.shape[-1]} numbers in the last dimension'
 
+        # Faltten all K-Lines so that we can deal with K-Lines only once
         _n_kpoints = klines[..., -1].sum(-1).long()
-        klines = klines.flatten(0, 1)
-        _mask = klines[..., -1].ge(1)
+        _klines = klines.flatten(0, 1)
+        _mask = _klines[..., -1].ge(1)
 
-        delta_k = klines[..., 3: 6] - klines[..., :3]
-        delta_k[_mask] = delta_k[_mask] / (klines[..., -1][_mask].unsqueeze(-1) - 1)
-        delta_k = torch.repeat_interleave(delta_k, klines[..., -1].long(), 0)
+        # Extend and get interval K-Points
+        delta_k = _klines[..., 3: 6] - _klines[..., :3]
+        delta_k[_mask] = delta_k[_mask] / (_klines[..., -1][_mask].unsqueeze(-1) - 1)
+        delta_k = torch.repeat_interleave(delta_k, _klines[..., -1].long(), 0)
         repeat_nums = torch.cat([
-            torch.arange(ik) for ik in klines[..., -1].long()]).unsqueeze(-1)
+            torch.arange(ik) for ik in _klines[..., -1].long()]).unsqueeze(-1)
         klines_ext = torch.repeat_interleave(
-            klines[..., :3], klines[..., -1].long(), 0) + delta_k * repeat_nums
+            _klines[..., :3], _klines[..., -1].long(), 0) + delta_k * repeat_nums
         klines_ext = pack(klines_ext.split(tuple(_n_kpoints.tolist())))
 
-        k_weights = torch.zeros(klines[..., -1].shape)
-        k_weights[_mask] = 1.0 / klines[..., -1][_mask]
-        k_weights = torch.repeat_interleave(k_weights, klines[..., -1].long())
-        k_weights = pack(k_weights.split(tuple(_n_kpoints.tolist())))
+        # Create averaged weight for each K-Lines
+        k_weights = pack(torch.split(
+            torch.repeat_interleave(1.0 / _n_kpoints, _n_kpoints),
+            tuple(_n_kpoints)))
 
         return klines_ext, _n_kpoints, k_weights
 
@@ -382,6 +369,7 @@ class Periodic:
         return pack([torch.exp((0. + 1.0j) * torch.einsum(
             'ij, ijk-> ik', ik, cell_vec)) for ik in kpoint.permute(1, 0, -1)])
 
+    @property
     def unique_atomic_numbers(self) -> Tensor:
         """Identifies and returns a tensor of unique atomic numbers.
 
@@ -392,4 +380,4 @@ class Periodic:
             unique_atomic_numbers: A tensor specifying the unique atomic
                 numbers present.
         """
-        return self.geometry.unique_atomic_numbers()
+        return self.geometry.unique_atomic_numbers

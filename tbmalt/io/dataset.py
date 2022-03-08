@@ -8,6 +8,7 @@ import scipy
 import numpy as np
 import torch
 import h5py
+import ase
 import ase.io as io
 from torch import Tensor
 from tbmalt import Geometry
@@ -28,9 +29,11 @@ class Dataset(_Dataset):
     def __init__(self, properties):
         self.properties = properties
 
+    @property
     def geometry(self) -> Geometry:
         """Create `Geometry` object in TBMaLT."""
         atomic_numbers = self.properties['atomic_numbers']
+        assert atomic_numbers.dim() == 2, 'do not support single `Geometry`.'
         positions = self.properties['positions']
         cell = self.properties['cell'] if 'cell' in self.properties.keys() \
             else torch.zeros(len(atomic_numbers), 3, 3)
@@ -48,9 +51,7 @@ class Dataset(_Dataset):
         pass
 
     def __repr__(self):
-        """Representation of `Dataset` object."""
-        assert self.geometry.positions.dim() == 3, 'do not support single `Geometry`.'
-
+        """Representation of "Dataset" object."""
         if not self.geometry.isperiodic:
             _pe = 'molecule'
         elif not self.geometry.periodic_list.all():
@@ -118,7 +119,7 @@ class Dataset(_Dataset):
                 'atomic_numbers': atomic_numbers,
                 'positions': positions,
                 'cell': cell
-                })
+            })
             return cls(properties)
         except Exception:
             get_logger.error(f'Fails to open {path_to_data}')
@@ -209,7 +210,8 @@ class AniDataloader:
                         if type(dataset) is np.ndarray:
                             if dataset.size != 0:
                                 if type(dataset[0]) is np.bytes_:
-                                    dataset = [a.decode('ascii') for a in dataset]
+                                    dataset = [a.decode('ascii')
+                                               for a in dataset]
 
                         data.update({k: dataset})
 
@@ -221,6 +223,7 @@ class AniDataloader:
         """Default class iterator (iterate through all data)."""
         for data in self.iterator(self.input):
             yield data
+
     def size(self):
         count = 0
         for g in self.input.values():
@@ -228,7 +231,7 @@ class AniDataloader:
         return count
 
 
-class GeometryTransfer(object):
+class GeometryTo(object):
     """Transfer and write various input geometries.
 
     Arguments:
@@ -239,12 +242,23 @@ class GeometryTransfer(object):
     """
 
     def __init__(self,
-                 in_geometry_files: Union[str, list],
+                 in_geometry_files: List[str],
+                 path_to_input_template: str,
                  to_geometry_type: Literal['h5', 'ase', 'geometry'] = 'cif',
-                 to_geometry_path: str = './'):
+                 to_geometry_path: str = './',
+                 calculation_properties=['energy'],
+                 **kwargs):
         self.in_geometry_files = in_geometry_files
+        self.path_to_input_template = path_to_input_template
         self.to_geometry_type = to_geometry_type
         self.to_geometry_path = to_geometry_path
+
+        if 'band' in calculation_properties:
+            self.bandpath = True
+            self.npoints = kwargs.get('npoints', 10)
+            self.n_band_grid = kwargs.get('n_band_grid', 10)
+        else:
+            self.bandpath = False
 
     def __call__(self, idx: Tensor = None):
         """Transfer geometry."""
@@ -261,23 +275,95 @@ class GeometryTransfer(object):
                 f'{self.to_geometry_path} do not exist, build now ...')
             os.system('mkdir -p ' + self.to_geometry_path)
 
+        # Select geometries with input indices
         if idx is not None:
             self.in_geometry_files = [self.in_geometry_files[ii] for ii in idx]
 
+        # Create geometric files and input files
         if isinstance(self.in_geometry_files, list):
             try:
+                # To list ASE object
                 _in = [io.read(ii) for ii in self.in_geometry_files]
             except:
                 get_logger(self.__class__.__name__).error(
                     f'could not load {self.in_geometry_files}')
 
+            self._obj_dict = {}
             if self.to_geometry_type == 'geometry':
                 return Geometry.from_ase_atoms(_in)
+
             elif self.to_geometry_type == 'aims':
-                [io.write(os.path.join(
-                    self.to_geometry_path, 'geometry.in.' + str(ii)), iin, format='aims')
-                 for ii, iin in enumerate(_in)]
+                for ii, iin in enumerate(_in):
+                    # Generate geometry file and copy to target dir
+                    io.write(os.path.join(
+                        self.to_geometry_path, 'geometry.in.' + str(ii)), iin, format='aims')
+
+                    # Copy tempalte input files and modify
+                    self._in_file = os.path.join(
+                        self.to_geometry_path, 'control.in.' + str(ii))
+
+                    # Deal with band structures
+                    if self.bandpath:
+                        _obj = self._aims_band(iin)
+                        self._obj_dict.update({ii: _obj.todict()})
+
             elif self.to_geometry_type == 'dftbplus':
-                [io.write(os.path.join(
-                    self.to_geometry_path, 'geo.gen.' + str(ii)), iin, format='dftb')
-                 for ii, iin in enumerate(_in)]
+                for ii, iin in enumerate(_in):
+                    io.write(os.path.join(
+                        self.to_geometry_path, 'geo.gen.' + str(ii)), iin, format='dftb')
+
+                    # Copy tempalte input files and modify
+                    self._in_file = os.path.join(
+                        self.to_geometry_path, 'dftb_in.hsd.' + str(ii))
+
+                    # Deal with band structures
+                    if self.bandpath:
+                        _obj = self._dftb_band(iin)
+                        self._obj_dict.update({ii: _obj.todict()})
+
+    def _aims_band(self, ase_aims_obj):
+        """Modify control.in file and return ase object with band strucutres."""
+        _obj = ase_aims_obj.cell.bandpath(npoints=self.npoints)
+        kpts = _obj.kpts
+        kpts_val = ''.join([
+            'output band ' + str(ib)[1:-1] + ' ' + str(ie)[1:-1] + ' ' + str(
+                self.n_band_grid) + '\n' for ib, ie in zip(kpts[:-1], kpts[1:])])
+        with open(self.path_to_input_template, 'r') as f:
+            data = f.read()
+            try:
+                data = data.replace('kpts', kpts_val)
+            except:
+                logger.error('could not replace "kpts" with real band path,' +
+                             ' check if there is keyword "kpts" in template')
+
+        # Write modified data to new control.in
+        with open(self._in_file, 'w') as f:
+            f.write(data)
+
+        return _obj
+
+    def _dftb_band(self, ase_aims_obj):
+        """Modify control.in file and return ase object with band strucutres."""
+        _obj = ase_aims_obj.cell.bandpath(npoints=self.npoints)
+        kpts = _obj.kpts
+        kpts_val = ''.join([
+            '1 ' + str(ib)[1:-1] + ' \n' + str(self.n_band_grid - 1) + ' '
+            + str(ie)[1:-1] + '\n' for ib, ie in zip(kpts[:-1], kpts[1:])])
+        with open(self.path_to_input_template, 'r') as f:
+            data = f.read()
+            try:
+                data = data.replace('kpts', kpts_val)
+            except:
+                logger.error('could not replace "kpts" with real band path,' +
+                             ' check if there is keyword "kpts" in template')
+
+        # Write modified data to new control.in
+        with open(self._in_file, 'w') as f:
+            f.write(data)
+
+        return _obj
+
+    @property
+    def obj_dict(self):
+        """ASE object dictionary."""
+        return self._obj_dict

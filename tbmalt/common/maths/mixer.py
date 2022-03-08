@@ -21,7 +21,8 @@ class _Mixer(ABC):
         self.return_convergence = kwargs.get('return_convergence', False)
         self.generations = kwargs.get('generations', 3)
         q_init = q_init.unsqueeze(0) if q_init.dim() == 0 else q_init  # H atom
-        q_init = q_init.unsqueeze(0) if q_init.dim() == 1 else q_init  # -> batch
+        q_init = q_init.unsqueeze(
+            0) if q_init.dim() == 1 else q_init  # -> batch
         assert q_init.dim() == 2
 
         self.q_init = q_init
@@ -247,7 +248,7 @@ class Anderson(_Mixer):
                 aa = aa * (1 + torch.eye(aa.shape[-1]) * self.gamma ** 2)
 
             # Solve for the coefficients, use mask to avoid singular U error
-            thetas = torch.solve(bb, aa)[0].squeeze(-1)
+            thetas = torch.linalg.solve(aa, bb).squeeze(-1)
             q_bar = (thetas * self._dQ[1: previous_step, self.mask].transpose(
                 2, 0)).transpose(2, 0).sum(0)
             F_bar = (thetas * self._F[1: previous_step, self.mask].transpose(
@@ -263,7 +264,8 @@ class Anderson(_Mixer):
 
         # If there is insufficient history for Anderson; use simple mixing
         else:
-            q_mix = self._dQ[0, self.mask] + (self._F[0, self.mask] * self.mix_param)
+            q_mix = self._dQ[0, self.mask] + \
+                (self._F[0, self.mask] * self.mix_param)
 
         # Shift F & dQ histories to avoid a pytorch inplace error
         self._F[:, self.mask] = torch.roll(self._F[:, self.mask], 1, 0)

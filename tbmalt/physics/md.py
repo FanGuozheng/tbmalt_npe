@@ -150,7 +150,7 @@ class Md:
         self._density = self.dftb.density
         self.density_e = self.dftb.energy_weighted_density
         self.eigenvalue = self.dftb.eigenvalue
-        self.deltaq = self.dftb.deltaq
+        self.deltaq = self.dftb.charge - self.dftb.qzero
 
     def _charge_potential(self):
         self.qzero_norm = self.dftb.qzero.T * (

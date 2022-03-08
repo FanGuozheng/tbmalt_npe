@@ -532,6 +532,9 @@ def eighb(a: Tensor,
     func = _SymEigB.apply if broadening_method else torch.linalg.eigh
     # Set up for the arguments
     args = (broadening_method, factor) if broadening_method else (True,)
+    iscomplex = True if b.dtype in (torch.complex32,
+                                    torch.complex64,
+                                    torch.complex128) else False
 
     if aux:
         # Convert from zero-padding to identity padding
@@ -560,6 +563,8 @@ def eighb(a: Tensor,
         if scheme == 'chol':
 
             # Perform Cholesky factorization (A = LL^{T}) of B to attain L
+            # l = torch.linalg.cholesky(b) if not iscomplex else \
+            #     torch.linalg.cholesky_ex(b)[0]
             l = torch.linalg.cholesky(b)
 
             # Compute the inverse of L:

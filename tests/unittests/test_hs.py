@@ -15,9 +15,8 @@ from tbmalt import Geometry, Basis, SkfFeed, SkfParamFeed
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
 from tbmalt.structures.periodic import Periodic
 from tbmalt.common.batch import pack
-torch.set_default_dtype(torch.float64)
-torch.set_printoptions(6)
 
+torch.set_default_dtype(torch.float64)
 shell_dict = {1: [0], 6: [0, 1], 7: [0, 1], 8: [0, 1],
               14: [0, 1], 22: [0, 1, 2]}
 
@@ -253,7 +252,7 @@ def test_si_pe(device):
     kpoints = torch.tensor([[1, 1, 1]])
     kpoints3 = torch.tensor([[3, 3, 3]])
     kpoints4 = torch.tensor([[3, 3, 3], [1, 2, 2]])
-    klines = torch.tensor([[0.5, 0.5, -0.5, 0], [0, 0, 0, 11]])
+    klines = torch.tensor([[0.5, 0.5, -0.5, 0, 0, 0, 11]])
 
     # Non-periodic geometry
     geometry = Geometry(
@@ -496,9 +495,9 @@ def test_si_pe(device):
 
 
 def test_ch3cho(device):
-    """Test TiO2."""
-    h_tio2 = _get_matrix('./tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
-    s_tio2 = _get_matrix('./tests/unittests/data/sk/ch3cho/oversqr.dat', device)
+    """Test CH3CHO."""
+    h_ch3cho = _get_matrix('./tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
+    s_ch3cho = _get_matrix('./tests/unittests/data/sk/ch3cho/oversqr.dat', device)
     geometry = Geometry.from_ase_atoms([molecule('CH3CHO')])
 
     path_sk = './tests/unittests/data/slko/mio'
@@ -515,14 +514,14 @@ def test_ch3cho(device):
     ham = hs_matrix(geometry, basis, h_feed)
     over = hs_matrix(geometry, basis, s_feed)
 
-    check_h_tio2 = torch.max(abs(ham.squeeze() - h_tio2)) < 1E-14
-    check_s_tio2 = torch.max(abs(over.squeeze() - s_tio2)) < 1E-14
+    check_h_ch3cho = torch.max(abs(ham.squeeze() - h_ch3cho)) < 1E-14
+    check_s_ch3cho = torch.max(abs(over.squeeze() - s_ch3cho)) < 1E-14
 
     check_persistence_h = ham.device == device
     check_persistence_s = over.device == device
 
-    assert check_h_tio2, 'real H tolerance check'
-    assert check_s_tio2, 'real S tolerance check'
+    assert check_h_ch3cho, 'real H tolerance check'
+    assert check_s_ch3cho, 'real S tolerance check'
     check_persistence_h, 'device check'
     check_persistence_s, 'device check'
 
@@ -649,134 +648,44 @@ def test_hs_matrix_batch_npe(device):
     assert check_persistence, 'Device persistence check failed'
 
 
-# def test_hs_d(device):
-#     """Test SK transformation values of d orbitals."""
-#     h_au_p = _get_matrix('./tests/unittests/data/sk/au/hamsqr1.dat.p', device)
-#     s_au_p = _get_matrix('./tests/unittests/data/sk/au/oversqr.dat.p', device)
-#     h_au_d = _get_matrix('./tests/unittests/data/sk/au/hamsqr1.dat', device)
-#     s_au_d = _get_matrix('./tests/unittests/data/sk/au/oversqr.dat', device)
-#     numbers = torch.tensor([79, 79]).to(device)
-#     max_l_p, max_l_d = {79: 1}, {79: 2}
-#     positions = torch.tensor([[0., 0., 0.], [1., 1., 0.]]).to(device)
-#     geometry = Geometry(numbers, positions, 'angstrom')
-#     basis_p = Basis(geometry.atomic_numbers, max_l_p)
-#     basis_d = Basis(geometry.atomic_numbers, max_l_d)
+@pytest.mark.grad
+def test_hs_matrix_grad(device):
+    ''''Test gradient of "SkfFeed".'''
 
-#     # build Hamiltonian and overlap tables feed from original SKF files
-#     h_feed_p, s_feed_p = SkfFeed.from_dir(
-#         './tests/unittests/data/slko/auorg', max_l_p, geometry,
-#         interpolation='PolyInterpU', h_feed=True, s_feed=True)
+    def proxy(geometry_in, basis_in, sk_feed_in, *args):
+        """Proxy function is needed to enable gradcheck to operate properly"""
+        return hs_matrix(geometry_in, basis_in, sk_feed_in)
 
-#     # build Hamiltonian and overlap tables feed with d orbitals
-#     h_feed_d, s_feed_d = SkfFeed.from_dir(
-#         './tests/unittests/data/slko/auorg', max_l_d, geometry,
-#         interpolation='PolyInterpU', h_feed=True, s_feed=True)
+    mol = molecule('CH4')
+    path_to_skf = './tests/unittests/data/slko/mio'
+    geometry = Geometry.from_ase_atoms(mol, device=device)
+    basis = Basis(geometry.atomic_numbers, shell_dict)
+    h_feed = SkfFeed.from_dir(
+        path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
+        interpolation='Spline1d', integral_type='H', build_abcd=True)
+    s_feed = SkfFeed.from_dir(
+        path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
+        interpolation='Spline1d', integral_type='S', build_abcd=True)
 
-#     ham_p = hs_matrix(geometry, basis_p, h_feed_p,  max_ls=max_l_p)
-#     over_p = hs_matrix(geometry, basis_p, s_feed_p)
+    argh = (
+        *h_feed.off_site(torch.tensor([6, 6]),
+                         torch.tensor([0, 0]),
+                         torch.tensor([2.0, 3.0])),
+        *h_feed.off_site(torch.tensor([6, 6]),
+                         torch.tensor([0, 1]),
+                         torch.tensor([2.0])),
+        *h_feed.off_site(torch.tensor([6, 6]),
+                         torch.tensor([0, 1]),
+                         torch.tensor([2.0, 3.0])),
+        )
+    args = (s_feed.off_site(torch.tensor([6, 6]),
+                            torch.tensor([0, 0]),
+                            torch.tensor([2.5])))
 
-#     check_h_p = torch.max(abs(ham_p - h_au_p)) < 1E-14
-#     check_s_p = torch.max(abs(over_p - s_au_p)) < 1E-14
-#     check_persistence_p = ham_p.device == device
+    grad_h = gradcheck(proxy, (geometry, basis, h_feed, *argh),
+                       raise_exception=False)
+    grad_s = gradcheck(proxy, (geometry, basis, s_feed, *args),
+                       raise_exception=False)
 
-#     ham_d = hs_matrix(geometry, basis_d, h_feed_d,  max_ls=max_l_d)
-#     over_d = hs_matrix(geometry, basis_d, s_feed_d)
-
-#     check_h_d = torch.max(abs(ham_d - h_au_d)) < 1E-14
-#     check_s_d = torch.max(abs(over_d - s_au_d)) < 1E-14
-#     check_persistence_d = ham_d.device == device
-
-#     assert check_h_p, 'Hamiltonian are outside of permitted tolerance thresholds'
-#     assert check_s_p, 'Overlap are outside of permitted tolerance thresholds'
-#     assert check_persistence_p, 'Device persistence check failed'
-
-#     assert check_h_d, 'Hamiltonian are outside of permitted tolerance thresholds'
-#     assert check_s_d, 'Overlap are outside of permitted tolerance thresholds'
-#     assert check_persistence_d, 'Device persistence check failed'
-
-
-
-# @pytest.mark.grad
-# def test_hs_matrix_grad(device):
-#     """
-
-#     Warnings:
-#         This gradient check can take a **VERY, VERY LONG TIME** if great care
-#         is not taken to limit the number of input variables. Therefore, tests
-#         are only performed on H2 and CH4, change at your own peril!
-#     """
-
-#     def proxy(geometry_in, basis_in, sk_feed_in, *args):
-#         """Proxy function is needed to enable gradcheck to operate properly"""
-#         return hs_matrix(geometry_in, basis_in, sk_feed_in)
-
-#     mol = molecule('CH4')
-#     path_to_skf = './tests/unittests/data/slko/mio'
-#     geometry = Geometry.from_ase_atoms(mol, device=device)
-#     basis = Basis(geometry.atomic_numbers, shell_dict)
-#     h_feed = SkfFeed.from_dir(
-#         path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
-#         interpolation='PolyInterpU', integral_type='H', h_grad=True)
-#     s_feed = SkfFeed.from_dir(
-#         path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
-#         interpolation='PolyInterpU', integral_type='S', s_grad=True)
-
-#     # Identify what variables the gradient will be calculated with respect to.
-#     argh = (*h_feed.off_site_dict[(6, 6, 0, 0)].yy,
-#             *h_feed.off_site_dict[(6, 6, 1, 1)].yy,
-#             *h_feed.off_site_dict[(1, 1, 0, 0)].yy)
-
-#     args = (*s_feed.off_site_dict[(6, 6, 0, 0)].yy,
-#             *s_feed.off_site_dict[(6, 6, 1, 1)].yy,
-#             *s_feed.off_site_dict[(1, 1, 0, 0)].yy)
-
-#     grad_h = gradcheck(proxy, (geometry, basis, h_feed, *argh),
-#                        raise_exception=False)
-#     grad_s = gradcheck(proxy, (geometry, basis, s_feed, *args),
-#                        raise_exception=False)
-
-#     assert grad_h, 'Hamiltonian gradient stability test failed.'
-#     assert grad_s, 'Overlap gradient stability test failed.'
-
-
-# @pytest.mark.grad
-# def test_hs_matrix_batch_grad(device):
-#     """
-
-#     Warnings:
-#         This gradient check can take a **VERY, VERY LONG TIME** if great care
-#         is not taken to limit the number of input variables. Therefore, tests
-#         are only performed on H2 and CH4, change at your own peril!
-#     """
-
-#     def proxy(geometry_in, basis_in, sk_feed_in, *args):
-#         """Proxy function is needed to enable gradcheck to operate properly"""
-#         return hs_matrix(geometry_in, basis_in, sk_feed_in)
-
-#     mol = [molecule('CH4'), molecule('H2')]
-#     path_to_skf = './tests/unittests/data/slko/mio'
-#     geometry = Geometry.from_ase_atoms(mol, device=device)
-#     basis = Basis(geometry.atomic_numbers, shell_dict)
-#     h_feed = SkfFeed.from_dir(
-#         path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
-#         interpolation='PolyInterpU', integral_type='H', h_grad=True)
-#     s_feed = SkfFeed.from_dir(
-#         path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
-#         interpolation='PolyInterpU', integral_type='S', s_grad=True)
-
-#     # Identify what variables the gradient will be calculated with respect to.
-#     argh = (*h_feed.off_site_dict[(6, 6, 0, 0)].yy,
-#             *h_feed.off_site_dict[(6, 6, 1, 1)].yy,
-#             *h_feed.off_site_dict[(1, 1, 0, 0)].yy)
-
-#     args = (*s_feed.off_site_dict[(6, 6, 0, 0)].yy,
-#             *s_feed.off_site_dict[(6, 6, 1, 1)].yy,
-#             *s_feed.off_site_dict[(1, 1, 0, 0)].yy)
-
-#     grad_h = gradcheck(proxy, (geometry, basis, h_feed, *argh),
-#                        raise_exception=False)
-#     grad_s = gradcheck(proxy, (geometry, basis, s_feed, *args),
-#                        raise_exception=False)
-
-#     assert grad_h, 'Hamiltonian gradient stability test failed.'
-#     assert grad_s, 'Overlap gradient stability test failed.'
+    assert grad_h, 'Hamiltonian gradient stability test failed.'
+    assert grad_s, 'Overlap gradient stability test failed.'

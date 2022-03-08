@@ -30,7 +30,7 @@ class MultiVarInterp:
         _y = self.y
 
         for ii, ix in enumerate(x_new.T):
-            _y  = self._1d_linear(ix, self.x[ii], _y, ii==0)
+            _y = self._1d_linear(ix, self.x[ii], _y, ii == 0)
 
         return self._1d_linear(distances, self.x[-1], _y, False)
 
@@ -125,12 +125,12 @@ class BicubInterp:
         self.arange_batch = torch.arange(self.batch)
 
         if self.hs_grid is not None:  # with DFTB+ distance interpolation
-            assert distances is not None, 'if hs_grid is not None, '+ \
+            assert distances is not None, 'if hs_grid is not None, ' + \
                 'distances is expected'
 
             # original dims: vcr1, vcr2, distances, n_orb_pairs
             # permute dims: distances, vcr1, vcr2, n_orb_pairs
-            zmesh = self.zmesh  #.permute([-2, 0, 1, -1])
+            zmesh = self.zmesh  # .permute([-2, 0, 1, -1])
 
             ski = PolyInterpU(self.hs_grid, zmesh)
             zmesh = ski(distances)
@@ -386,16 +386,16 @@ class BSpline:
                 yy = self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
             elif tt[jj + kk - 1] == tt[jj] and tt[jj + kk] != tt[jj + 1]:
                 yy = (1 - (xx - t2) / (t4 - t2)) * \
-                     self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
+                    self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
             elif tt[jj + kk - 1] != tt[jj] and tt[jj + kk] == tt[jj + 1]:
                 yy = (xx - t1) / (t3 - t1) * \
-                     self._b_spline(tt, xx, nodes, jj, kk - 1) \
-                     + self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
+                    self._b_spline(tt, xx, nodes, jj, kk - 1) \
+                    + self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
             else:
                 yy = (xx - t1) / (t3 - t1) * \
-                     self._b_spline(tt, xx, nodes, jj, kk - 1) \
-                     + (1 - (xx - t2) / (t4 - t2)) * \
-                     self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
+                    self._b_spline(tt, xx, nodes, jj, kk - 1) \
+                    + (1 - (xx - t2) / (t4 - t2)) * \
+                    self._b_spline(tt, xx, nodes, jj + 1, kk - 1)
         return yy
 
     def __call__(self, x_new: torch.Tensor, *args: torch.Tensor, grid=True)\
@@ -543,7 +543,8 @@ class Spline1d:
         dx = self.xnew[self.mask] - self.xp[self.dind]
         _intergal = aa[..., self.dind] + bb[..., self.dind] * dx + \
             cc[..., self.dind] * dx ** 2 + dd[..., self.dind] * dx ** 3
-        _intergal = _intergal.transpose(-1, 0) if _intergal.dim() > 1 else _intergal
+        _intergal = _intergal.transpose(-1,
+                                        0) if _intergal.dim() > 1 else _intergal
         _y = torch.zeros(self.xnew.shape[0], *_intergal.shape[1:])
         _y[self.mask] = _intergal
         return _y
@@ -571,7 +572,7 @@ class Spline1d:
         B[..., 1:-1] = 3 * (dyp[..., 1:] / dxp[1:] - dyp[..., :-1] / dxp[:-1])
         B = B.permute(1, 0) if B.dim() == 2 else B
 
-        cc, _ = torch.lstsq(B, A)
+        cc = torch.linalg.lstsq(A, B)[0]
         cc = cc.permute(1, 0) if cc.dim() == 2 else cc.unsqueeze(0)
         bb = dyp / dxp - dxp * (cc[..., 1:] + 2 * cc[..., :-1]) / 3
         dd = (cc[..., 1:] - cc[..., :-1]) / (3 * dxp)
@@ -668,7 +669,7 @@ class PolyInterpU:
             elif self.yy.dim() == 3:
                 assert self.yy.shape[1] == rr.shape[0], 'each distance ' + \
                     'corresponding to different integrals, the size should' + \
-                        f' be same, but get {self.yy.shape[1]}, {rr.shape[0]}'
+                    f' be same, but get {self.yy.shape[1]}, {rr.shape[0]}'
                 yb = torch.stack([self.yy[il - self.n_interp - 1: il - 1, ii]
                                   for ii, il in enumerate(ind_last)]).to(self._device)
             elif self.yy.dim() == 4:
@@ -678,7 +679,8 @@ class PolyInterpU:
 
         # Beyond the grid => extrapolation with polynomial of 5th order
         max_ind = n_grid_point - 1 + int(self.tail / self.grid_step)
-        is_tail = ind.masked_fill(ind.ge(n_grid_point) * ind.le(max_ind), -1).eq(-1)
+        is_tail = ind.masked_fill(
+            ind.ge(n_grid_point) * ind.le(max_ind), -1).eq(-1)
         if is_tail.any():
             # dr = rr[is_tail] - r_max
             # ilast = n_grid_point
@@ -709,7 +711,8 @@ class PolyInterpU:
             ilast = n_grid_point
 
             # get grid points and grid point values
-            xa = (ilast - self.n_interp + torch.arange(self.n_interp)) * self.grid_step
+            xa = (ilast - self.n_interp +
+                  torch.arange(self.n_interp)) * self.grid_step
             yb = self.yy[ilast - self.n_interp - 1: ilast - 1]
             xa = xa.repeat(dr.shape[0]).reshape(dr.shape[0], -1)
             yb = yb.unsqueeze(0).repeat_interleave(dr.shape[0], dim=0)
@@ -724,7 +727,8 @@ class PolyInterpU:
             if y1pp.dim() == 3:  # -> compression radii, not good
                 dr = dr.repeat(y1pp.shape[1], y1pp.shape[2], 1).transpose(-1, 0)
             elif y1pp.dim() == 4:  # -> compression radii, not good
-                dr = dr.repeat(y1pp.shape[1], y1pp.shape[2], 1, 1).permute(-1, 0, 1, 2)
+                dr = dr.repeat(
+                    y1pp.shape[1], y1pp.shape[2], 1, 1).permute(-1, 0, 1, 2)
 
             result[is_tail] = poly5_zero(y1, y1p, y1pp, dr, -1.0 * self.tail)
 
@@ -732,7 +736,7 @@ class PolyInterpU:
 
 
 def vcr_poly_to_zero(xx: Tensor, yy: Tensor, n_grid: Tensor, ninterp=8,
-                      delta_r=1E-5, tail=1.0):
+                     delta_r=1E-5, tail=1.0):
     """Smooth the tail with input xx and yy with various compression radii.
 
     Arguments:
@@ -928,7 +932,7 @@ def poly_interp_2d(xp: Tensor, yp: Tensor, rr: Tensor) -> Tensor:
 
 
 def poly_to_zero2(xx: Tensor, dx: Tensor, inv_dist: Tensor,
-                 y0: Tensor, y0p: Tensor, y0pp: Tensor) -> Tensor:
+                  y0: Tensor, y0p: Tensor, y0pp: Tensor) -> Tensor:
     """Get interpolation if beyond the grid range with 5th order polynomial.
     Arguments:
         y0: Values to be interpolated at each grid point.
@@ -997,7 +1001,7 @@ def poly_to_zero(xx: Tensor, yy: Tensor, ninterp=8, delta_r=1E-5, tail=1.0):
 
 
 def vcr_poly_to_zero(xx: Tensor, yy: Tensor, n_grid: Tensor, ninterp=8,
-                      delta_r=1E-5, tail=1.0):
+                     delta_r=1E-5, tail=1.0):
     """Smooth the tail with input xx and yy with various compression radii.
 
     Arguments:

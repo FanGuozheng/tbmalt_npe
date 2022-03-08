@@ -1,15 +1,14 @@
 """Train code."""
-from typing import Literal
+from typing import Literal, Dict
 import logging
 import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-from tbmalt import Geometry, Dftb2, SkfParamFeed
+from tbmalt import Geometry, Dftb2, SkfParamFeed, Shell
 from tbmalt.common.maths import hellinger
 from tbmalt.common.batch import pack
 from tbmalt.ml.skfeeds import SkfFeed, VcrFeed, TvcrFeed
-from tbmalt.structures.basis import Basis
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
 from tbmalt.ml.feature import Dscribe
 from tbmalt.ml.scikitlearn import SciKitLearn
@@ -119,9 +118,9 @@ class OptHs(Model):
             skf_type: Literal['h5', 'skf'] = 'h5',
             logger: logging.RootLogger = None,
             **kwargs
-            ):
+    ):
         kpoints = kwargs.get('kpoints', None)
-        self.basis = Basis(geometry.atomic_numbers, shell_dict)
+        self.basis = Shell(geometry.atomic_numbers, shell_dict)
         self.shell_dict = shell_dict
         build_abcd_h = kwargs.get('build_abcd_h', True)
         build_abcd_s = kwargs.get('build_abcd_s', True)
@@ -148,7 +147,7 @@ class OptHs(Model):
             self.periodic = Periodic(self.geometry, self.geometry.cell,
                                      cutoff=self.skparams.cutoff, **kwargs)
 
-    def forward(self, plot: bool =True, save: bool = True, **kwargs):
+    def forward(self, plot: bool = True, save: bool = True, **kwargs):
         """Train spline parameters with target properties."""
         self.logger.info('training...')
         super().forward()
@@ -156,7 +155,7 @@ class OptHs(Model):
         for istep in range(self.steps):
             self._update_train()
             self._loss.append(self.loss.detach().tolist())
-            self.logger.info(f'step: {istep}, loss: %.6f'%self._loss[-1])
+            self.logger.info(f'step: {istep}, loss: %.6f' % self._loss[-1])
 
             break_tolerance = istep >= self.params['ml']['min_steps']
             if self.reach_convergence and break_tolerance:
@@ -185,10 +184,11 @@ class OptHs(Model):
 
     def predict(self,  geometry_pred: object):
         """Predict with optimized Hamiltonian and overlap."""
-        basis = Basis(geometry_pred.atomic_numbers, self.shell_dict)
+        basis = Shell(geometry_pred.atomic_numbers, self.shell_dict)
         ham = hs_matrix(geometry_pred, basis, self.h_feed)
         over = hs_matrix(geometry_pred, basis, self.s_feed)
-        dftb = Dftb2(self.params, geometry_pred, self.shell_dict, ham, over, from_skf=True)
+        dftb = Dftb2(self.params, geometry_pred,
+                     self.shell_dict, ham, over, from_skf=True)
         dftb()
         return dftb
 
@@ -204,23 +204,14 @@ class OptVcr(Model):
             skf_type: Literal['h5', 'skf'] = 'h5',
             logger: logging.RootLogger = None,
             **kwargs
-            ):
+    ):
         self.compr_grid = compr_grid
         self.global_r = kwargs.get('global_r', False)
         self.repulsive = kwargs.get('repulsive', False)
-        self.unique_atomic_numbers = geometry.unique_atomic_numbers()
+        self.unique_atomic_numbers = geometry.unique_atomic_numbers
 
         if not self.global_r:
             self.compr = torch.ones(geometry.atomic_numbers.shape) * 3.5
-            # self.compr.requires_grad_(True)
-            # self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
-            # init_dict = {1: torch.tensor([2.5, 3.0]),
-            #              6: torch.tensor([7.0, 2.7]),
-            #              7: torch.tensor([8.0, 2.2]),
-            #              8: torch.tensor([8.0, 2.3])}
-            # for ii, iu in enumerate(self.unique_atomic_numbers):
-            #     mask = geometry.atomic_numbers == iu
-            #     self.compr[mask] = init_dict[iu.tolist()]
 
             self.compr.requires_grad_(True)
         else:
@@ -233,7 +224,7 @@ class OptVcr(Model):
         self.s_compr_feed = kwargs.get('s_compr_feed', True)
 
         self.shell_dict = shell_dict
-        self.basis = Basis(geometry.atomic_numbers, self.shell_dict)
+        self.basis = Shell(geometry.atomic_numbers, self.shell_dict)
         if self.h_compr_feed:
             self.h_feed = VcrFeed.from_dir(
                 parameter['dftb']['path_to_skf'], self.shell_dict, compr_grid,
@@ -261,17 +252,16 @@ class OptVcr(Model):
         else:
             self.periodic = None
 
-
     def forward(self, plot: bool = True, save: bool = True, **kwargs):
         """Train compression radii with target properties."""
         super().forward()
         self._compr = []
-        self.ham_list,self.over_list = [], []
+        self.ham_list, self.over_list = [], []
         self._loss = []
         for istep in range(self.steps):
             self._update_train()
             self._loss.append(self.loss.detach().tolist())
-            self.logger.info(f'step: {istep}, loss: %.6f'%self._loss[-1])
+            self.logger.info(f'step: {istep}, loss: %.6f' % self._loss[-1])
 
             break_tolerance = istep >= self.params['ml']['min_steps']
             if self.reach_convergence and break_tolerance:
@@ -346,12 +336,14 @@ class OptVcr(Model):
 
     def predict(self, geometry_pred: object, split_ratio: float = 0.5, **kwargs):
         """Predict with optimized Hamiltonian and overlap."""
-        basis_pred = Basis(geometry_pred.atomic_numbers, self.shell_dict)
+        basis_pred = Shell(geometry_pred.atomic_numbers, self.shell_dict)
 
         # predict features
         feature_type = 'acsf'
-        feature = Dscribe(self.geometry, feature_type=feature_type, **kwargs).features
-        feature_pred = Dscribe(geometry_pred, feature_type=feature_type, **kwargs).features
+        feature = Dscribe(
+            self.geometry, feature_type=feature_type, **kwargs).features
+        feature_pred = Dscribe(
+            geometry_pred, feature_type=feature_type, **kwargs).features
 
         # use scikit learn to predict
         target = self.compr.detach()[self.geometry.atomic_numbers.ne(0)]
@@ -367,7 +359,8 @@ class OptVcr(Model):
             geometry_pred, interpolation='BicubInterp', h_feed=True, s_feed=True)
         ham2 = hs_matrix(geometry_pred, basis_pred, h_feed2, compr_pred2)
         over2 = hs_matrix(geometry_pred, basis_pred, s_feed2, compr_pred2)
-        dftb2 = Dftb2(self.params, geometry_pred, self.shell_dict, ham2, over2, from_skf=True)
+        dftb2 = Dftb2(self.params, geometry_pred,
+                      self.shell_dict, ham2, over2, from_skf=True)
         dftb2()
         return dftb2
 
@@ -375,67 +368,70 @@ class OptVcr(Model):
 class OptTvcr(Model):
     """Optimize compression radii."""
 
-    def __init__(self, geometry: Geometry, reference, parameter,
-                 tvcr: Tensor, shell_dict, **kwargs):
+    def __init__(self, geometry: Geometry,
+                 reference,
+                 parameter,
+                 tvcr: Tensor,
+                 shell_dict: Dict,
+                 logger: logging.RootLogger = None,
+                 **kwargs):
         """Initialize parameters."""
         self.tvcr = tvcr
         interpolation = kwargs.get('interpolation', 'MultiVarInterp')
         self.global_r = kwargs.get('global_r', False)
-        self.unique_atomic_numbers = geometry.unique_atomic_numbers()
+        self.unique_atomic_numbers = geometry.unique_atomic_numbers
+        self.repulsive = kwargs.get('repulsive', False)
 
         if not self.global_r:
             # self.compr = torch.ones(geometry.atomic_numbers.shape, 2) * 3.5
             # self.compr.requires_grad_(True)
 
-            # self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
-            # init_dict = {1: torch.tensor([2.5, 3.0]),
-            #              6: torch.tensor([7.0, 2.7]),
-            #              7: torch.tensor([8.0, 2.2]),
-            #              8: torch.tensor([8.0, 2.3])}
-            # for ii, iu in enumerate(self.unique_atomic_numbers):
-            #     mask = geometry.atomic_numbers == iu
-            #     self.compr[mask] = init_dict[iu.tolist()]
+            self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
+            init_dict = {1: torch.tensor([2.5, 3.0]),
+                         6: torch.tensor([7.0, 2.7]),
+                         7: torch.tensor([8.0, 2.2]),
+                         8: torch.tensor([8.0, 2.3])}
+            for ii, iu in enumerate(self.unique_atomic_numbers):
+                mask = geometry.atomic_numbers == iu
+                self.compr[mask] = init_dict[iu.tolist()]
 
-            # self.compr.requires_grad_(True)
-
-            raise NotImplementedError('OptTvcr only support global varibales.')
+            self.compr.requires_grad_(True)
+            variables = [self.compr]
         else:
-            # self.compr0 = torch.ones(len(self.unique_atomic_numbers), 2) * 3.5
-            # self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
-            # self.compr0.requires_grad_(True)
-
             self.compr = torch.zeros(*geometry.atomic_numbers.shape, 2)
             self.compr0 = torch.tensor(
                 [[2.5, 3.0], [7.0, 2.7], [8.0, 2.2], [8.0, 2.3]]).requires_grad_(True)
+            variables = [self.compr0]
 
         self.h_compr_feed = kwargs.get('h_compr_feed', True)
         self.s_compr_feed = kwargs.get('s_compr_feed', True)
+        self.train_onsite = kwargs.get('train_onsite', False)
 
         self.shell_dict = shell_dict
-        self.basis = Basis(geometry.atomic_numbers, self.shell_dict)
+        self.basis = Shell(geometry.atomic_numbers, self.shell_dict)
         if self.h_compr_feed:
             self.h_feed = TvcrFeed.from_dir(
                 parameter['dftb']['path_to_skf'], self.shell_dict, tvcr,
-                skf_type='h5', geometry=geometry, integral_type='H',
-                interpolation=interpolation)
+                geometry=geometry, skf_type='h5', integral_type='H',
+                interpolation=interpolation, train_onsite=self.train_onsite)
         if self.s_compr_feed:
             self.s_feed = TvcrFeed.from_dir(
                 parameter['dftb']['path_to_skf'], self.shell_dict, tvcr,
-                skf_type='h5', geometry=geometry, integral_type='S',
+                geometry=geometry, skf_type='h5', integral_type='S',
                 interpolation=interpolation)
 
         if not self.global_r:
             super().__init__(
-                geometry, reference, [self.compr], parameter, **kwargs)
+                geometry, reference, variables, parameter, logger, **kwargs)
         else:
             super().__init__(
-                geometry, reference, [self.compr0], parameter, **kwargs)
+                geometry, reference, variables, parameter, logger, **kwargs)
 
     def forward(self, plot: bool = True, save: bool = True, **kwargs):
         """Train compression radii with target properties."""
         super().forward()
         self._compr = []
-        self.ham_list,self.over_list = [], []
+        self.ham_list, self.over_list = [], []
         for istep in range(self.steps):
             self._update_train()
             print('step: ', istep, 'loss: ', self.loss.detach())
@@ -469,10 +465,12 @@ class OptTvcr(Model):
             over = hs_matrix(self.geometry, self.basis, self.s_feed2)
 
         self.ham_list.append(ham.detach()), self.over_list.append(over.detach())
-        self.dftb = Dftb2(self.params, self.geometry, self.shell_dict,
-                          self.params['dftb']['path_to_skf'],
-                          H=ham, S=over, from_skf=True)
-        # self.dftb()
+        self.dftb = Dftb2(geometry=self.geometry,
+                          shell_dict=self.shell_dict,
+                          path_to_skf=self.params['dftb']['path_to_skf'],
+                          repulsive=self.repulsive
+                          )
+        self.dftb(hamiltonian=ham, overlap=over)
         super().__loss__(self.dftb)
         self._compr.append(self.compr.detach().clone())
         self.optimizer.zero_grad()

@@ -2,12 +2,10 @@
 
 The second derivative in SK integral result in slightly accuracy decrease."""
 import torch
-from tbmalt import Geometry, SkfParamFeed, hs_matrix
-from ase import Atoms
 from ase.build import molecule
-from tbmalt.ml.skfeeds import VcrFeed, TvcrFeed
-from tbmalt.data.units import length_units
+from tbmalt import Geometry, SkfParamFeed
 from tbmalt.structures.periodic import Periodic
+from tbmalt.common.batch import pack
 torch.set_default_dtype(torch.float64)
 torch.set_printoptions(15)
 
@@ -53,12 +51,12 @@ def _get_cell_trans(latVec, cutoff, negExt=1, posExt=1, unit='bohr'):
     return cellvec.T, rcellvec
 
 
-def test_pe_normal_ch4():
+def test_pe_ch4(device):
     """Test CH4 Hamiltonian and ovelap in periodic geometry."""
     latvec = torch.tensor([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]])
     positions = torch.tensor([[[.5, .5, .5], [.6, .6, .6], [.4, .6, .6],
                               [.6, .4, .6], [.6, .6, .4]]])
-    path = './data/slko/mio'
+    path = './tests/unittests/data/slko/mio'
     cutoff = torch.tensor([9.98])
     numbers = torch.tensor([[6, 1, 1, 1, 1]])
     cellvec_ref, rcellvec_ref = _get_cell_trans(latvec, cutoff + 1, unit='bohr')
@@ -72,21 +70,20 @@ def test_pe_normal_ch4():
     assert torch.max(abs(periodic.rcellvec[0] - rcellvec_ref)) < 1E-14
 
 
+def test_klines():
+    pass
+
+def test_kpoints():
+    pass
+
+
 def test_phase():
     # Get packed selected cell_vector within the cutoff [n_batch, max_cell, 3]
-    return pack([torch.exp((0. + 1.0j) * torch.bmm(
-        ik[mask[0]].unsqueeze(1), cell_vec[mask[0]]))
-        for ik in kpoint.permute(1, 0, -1)]).squeeze(2)
+    # kpoint = 2.0 * np.pi * kpoint
 
-
-def test_pe_normal_co2():
-    """Test CO2 Hamiltonian and ovelap in periodic geometry."""
-    latvec = torch.tensor([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]])
-    positions = torch.tensor([[.5, .5, .5], [.55, .55, .55], [.45, .45, .45]])
-    numbers = torch.tensor([6, 8, 8])
-    cutoff = torch.tensor([9.98])
-    cellvec_ref, rcellvec_ref = _get_cell_trans(latvec / length_units['angstrom'], cutoff + 1)
-    geo = Geometry(numbers, positions, latvec)
-    periodic = Periodic(geo, geo.cell, sktable.cutoff, unit='bohr')
-    assert torch.max(abs(periodic.cellvec[0] - cellvec_ref)) < 1E-14
-    assert torch.max(abs(periodic.rcellvec[0] - rcellvec_ref)) < 1E-14
+    # # shape: [n_batch, n_cell, 3]
+    # cell_vec = cellvec_neighbour
+    # return pack([torch.exp((0. + 1.0j) * torch.bmm(
+    #     ik[mask[0]].unsqueeze(1), cell_vec[mask[0]]))
+    #     for ik in kpoint.permute(1, 0, -1)]).squeeze(2)
+    pass

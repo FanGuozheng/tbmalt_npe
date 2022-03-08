@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 
 from tbmalt import ConvergenceError
-from tbmalt import Basis
+from tbmalt import Shell
 from tbmalt.common import float_like
 from tbmalt.common.batch import psort
 
@@ -15,7 +15,7 @@ _Scheme = Callable[[Tensor, Tensor, float_like], Tensor]
 
 
 def fermi_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
-                  e_mask: Optional[Union[Tensor, Basis]] = None) -> Tensor:
+                  e_mask: Optional[Union[Tensor, Shell]] = None) -> Tensor:
     r"""Calculates the electronic entropy term for Fermi-Dirac smearing.
 
         Calculate a system's electronic entropy term. The entropy term is required
@@ -38,8 +38,8 @@ def fermi_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
             ts: The entropy term(s).
 
         """
-    # If a Basis instance was given as a mask then convert it to a tensor
-    if isinstance(e_mask, Basis):
+    # If a Shell instance was given as a mask then convert it to a tensor
+    if isinstance(e_mask, Shell):
         e_mask = e_mask.on_atoms != -1
 
     # Shape of eigenvalue tensor in which k-points & spin-channels (with
@@ -62,7 +62,7 @@ def fermi_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
 
 
 def gaussian_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
-                     e_mask: Optional[Union[Tensor, Basis]] = None) -> Tensor:
+                     e_mask: Optional[Union[Tensor, Shell]] = None) -> Tensor:
     r"""Calculates the electronic entropy term for Gaussian bases smearing.
 
         .. math::
@@ -81,8 +81,8 @@ def gaussian_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
             ts: The entropy term(s).
 
         """
-    # If a Basis instance was given as a mask then convert it to a tensor
-    if isinstance(e_mask, Basis):
+    # If a Shell instance was given as a mask then convert it to a tensor
+    if isinstance(e_mask, Shell):
         e_mask = e_mask.on_atoms != -1
 
     # Shape of eigenvalue tensor in which k-points & spin-channels (with
@@ -112,7 +112,7 @@ def gaussian_entropy(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like,
 
 def _smearing_preprocessing(
         eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like
-        ) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:
     """Abstracts repetitive code from the smearing functions.
 
     Arguments:
@@ -186,7 +186,10 @@ def fermi_smearing(eigenvalues: Tensor, fermi_energy: Tensor, kT: float_like
     # stability issue associated with this function.
     fermi_energy, kT = _smearing_preprocessing(eigenvalues, fermi_energy, kT)
     # Calculate and return the occupancies values via the Fermi-Dirac method
-    return 1.0 / (1.0 + torch.exp((eigenvalues - fermi_energy) / kT))
+    # return 1.0 / (1.0 + torch.exp((eigenvalues - fermi_energy) / kT))
+    vals = 1.0 / (1.0 + torch.exp((eigenvalues - fermi_energy) / kT))
+    vals[eigenvalues.eq(0)] = 0.0
+    return vals
 
 
 def gaussian_smearing(eigenvalues: Tensor, fermi_energy: Tensor,
@@ -233,7 +236,7 @@ def fermi_search(
         eigenvalues: Tensor, n_electrons: float_like,
         kT: Optional[float_like] = None, scheme: _Scheme = fermi_smearing,
         tolerance: Optional[Real] = None, max_iter: int = 200,
-        e_mask: Optional[Union[Tensor, Basis]] = None,
+        e_mask: Optional[Union[Tensor, Shell]] = None,
         k_weights: Optional[Tensor] = None) -> Tensor:
     r"""Determines the Fermi-energy of a system or batch thereof.
 
@@ -264,7 +267,7 @@ def fermi_search(
         e_mask: Provides info required to distinguish "real" ``eigenvalues``
             from "fake" ones. This is Mandatory when using smearing on batched
             systems. This may be a `Tensor` that is `True` for real states or
-            a `Basis` object. [DEFAULT=None]
+            a `Shell` object. [DEFAULT=None]
         k_weights: If periodic systems are supplied then k-point wights can be
             given via this argument.
 
@@ -310,17 +313,19 @@ def fermi_search(
                density functional theory based atomistic simulations. The
                Journal of Chemical Physics, 152(12), 124101.
     """
-    def middle_gap_approximation():
+    def middle_gap_approximation(scale_factor):
         """Returns the midpoint between the HOMO and LUMO."""
         # Flatten & sort the eigenvalues so there's 1 row per-system; the
         # spin dimension is only flattened when the spin channels share a
         # common fermi-energy.
         ev_flat, srt = psort(
-            e_vals.view(shp),
+            e_vals.reshape(shp),
             None if e_mask is None else e_mask.view(shp))
 
+        scale_flat = scale_factor if k_weights is None else scale_factor.reshape(
+            shp)
         # Maximum occupation of each eigenstate, sorted and flattened.
-        occ = (torch.ones_like(ev_flat) * scale_factor).gather(-1, srt)
+        occ = (torch.ones_like(ev_flat) * scale_flat).gather(-1, srt)
         # Locate HOMO index, via the transition between under/over filled
         i_homo = occ.cumsum(-1).T.le(n_elec).T.diff().nonzero().T[-1].view(shp)
         # Return the Fermi value
@@ -341,15 +346,21 @@ def fermi_search(
     # 2/1 for restricted/unrestricted molecular systems. For periodic systems
     # this is then multiplied by the k-point weights.
     pf = 5 - e_vals.ndim - [k_weights, e_mask].count(None)
-    scale_factor = pf if k_weights is None else pf * k_weights
+    scale_factor = pf if k_weights is None else pf * k_weights.repeat(
+        1, e_vals.shape[-1]).reshape(e_vals.shape)
 
     # Shape of Ɛ tensor where k-points & spin-channels have been flattened out.
     # Note that only spin-channels with common fermi energies get flattened.
     shp = torch.Size([*n_elec.shape, -1])
 
-    # If a Basis instance was given as a mask then convert it to a tensor
-    if isinstance(e_mask, Basis):
+    # If a Shell instance was given as a mask then convert it to a tensor
+    if isinstance(e_mask, Shell):
         e_mask = e_mask.on_atoms != -1
+
+        # Add periodic conditions
+        if k_weights is not None:
+            e_mask = e_mask.repeat(
+                1, k_weights.shape[-1], 1).reshape(e_vals.shape)
 
     # __Error Checking__
     eps = torch.finfo(dtype).eps
@@ -368,13 +379,13 @@ def fermi_search(
 
     # A system has too many electrons
     if torch.any((n_elec / pf).gt(e_vals.view(shp).shape[-1] if e_mask is None
-                               else e_mask.view(shp).count_nonzero(-1))):
+                                  else e_mask.view(shp).count_nonzero(-1))):
         raise ValueError('Number of electrons cannot exceed 2 * n states')
 
     # __Finite Temperature Disabled__
     # Set the fermi energy to the mid point between the HOMO and LUMO.
     if kT is None:
-        return middle_gap_approximation()
+        return middle_gap_approximation(scale_factor)
 
     # __Finite Temperature Enabled__
     # Perform a fermi level search via the bisection method
@@ -395,13 +406,16 @@ def fermi_search(
                 res[~e_mask[m]] = 0.0
 
             # Sum up over all axes apart from the batch dimension
-            return (res * scale_factor).T.sum_to_size(n_elec[m].shape)
+            if isinstance(scale_factor, Tensor):
+                return (res * scale_factor[m]).T.sum_to_size(n_elec[m].shape)
+            else:
+                return (res * scale_factor).T.sum_to_size(n_elec[m].shape)
 
         # If there's an even, integer number of e⁻; try setting e_fermi to
         # the middle gap, i.e. fill according to the Aufbau principle.
         if (mask := abs((n_elec / 2) - (n_elec / 2).round()) <= tol).any():
             # Store fermi value, recalculate № of e⁻ & identity of convergence
-            e_fermi[mask] = middle_gap_approximation()[mask]
+            e_fermi[mask] = middle_gap_approximation(scale_factor)[mask]
             c_mask[mask] = abs(elec_count(e_fermi)[mask] - n_elec[mask]) < tol
 
         # If all systems converged then just return the results now
@@ -411,8 +425,8 @@ def fermi_search(
         # __Setup Bounds for Bisection Search__
         # Identify upper (e_up) & lower (e_lo) search bounds; fermi level should
         # be between the highest & lowest eigenvalues, so start there.
-        e_lo = e_vals.view(shp).min(-1).values
-        e_up = e_vals.view(shp).max(-1).values
+        e_lo = e_vals.reshape(shp).min(-1).values
+        e_up = e_vals.reshape(shp).max(-1).values
         ne_lo, ne_up = elec_count(e_lo), elec_count(e_up)
 
         # Bounds may fail on large kT or full band structures; if too many e⁻

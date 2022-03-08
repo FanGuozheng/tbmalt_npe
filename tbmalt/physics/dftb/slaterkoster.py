@@ -12,8 +12,7 @@ import numpy as np
 import torch
 from torch.nn.functional import normalize
 from torch import Tensor, stack
-from tbmalt import Geometry, Basis
-from tbmalt.common import split_by_size
+from tbmalt import Geometry, Shell
 from tbmalt.common.batch import pack
 from tbmalt.ml.skfeeds import SkFeed
 
@@ -22,7 +21,7 @@ _SQR3, _SQR6, _SQR10, _SQR15 = np.sqrt(np.array([3., 6., 10., 15.])).tolist()
 _HSQR3 = 0.5 * np.sqrt(3.)
 
 
-def hs_matrix(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
+def hs_matrix(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
               **kwargs) -> Tensor:
     """Build the Hamiltonian or overlap matrix via Slater-Koster transforms.
 
@@ -32,7 +31,7 @@ def hs_matrix(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
 
     Arguments:
         geometry: `Geometry` instance associated with the target system(s).
-        basis: `Basis` instance associated with the target system(s).
+        basis: `Shell` instance associated with the target system(s).
         sk_feed: The Slater-Koster feed entity responsible for providing the
             requisite Slater Koster integrals and on-site terms.
 
@@ -191,24 +190,30 @@ def hs_matrix(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
             # № of sub-blocks in each system.
             nl = index_mask_s[0].unique(return_counts=True)[1]
             # Indices of each row
-            # r_offset = torch.arange(nr).expand(len(index_mask_s[-1]), nc).T
             r_offset = torch.arange(nr).repeat(len(index_mask_s[-1]), 1).T
+
             # Index list to order the rows of all ℓ₁-ℓ₂ sub-blocks so that
             # the results can be assigned back into the H/S tensors without
             # mangling.
             r = (r_offset + index_mask_s[-2] * nc).T.flatten().split((
                 nr * nl).tolist())
-            r, _mask = pack(r, value=99, return_mask=True)
+            # Warning: The value should be large enough If your system is large
+            r, _mask = pack(r, value=999999999, return_mask=True)
             r = r.cpu().sort(stable=True).indices
+
             # Correct the index list.
             r[1:] = r[1:] + (nl.cumsum(0)[:-1] * nr).unsqueeze(
                 -1).repeat_interleave((r.shape[-1]), dim=-1)
             r = r[_mask]
+
             # The "r" tensor only takes into account the central image, thus
             # the other images must now be taken into account.
             if isperiodic:
-                n = int(sk_data[..., 0].nelement() / (r.nelement() * nr))
+                # The second int results from a bug, some specific number. Z.B.
+                # int(7958 / torch.tensor(7958)) should be 1 but is zero
+                n = int(sk_data[..., 0].nelement() / int(r.nelement() * nr))
                 r = (r + (torch.arange(n) * len(r)).view(-1, 1)).flatten()
+
             # Perform the reordering
             if not isperiodic:
                 sk_data = sk_data.reshape(-1, nc)[r]
@@ -252,8 +257,8 @@ def hs_matrix(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
     return mat
 
 
-def hs_matrix_nn(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
-              **kwargs) -> Tensor:
+def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
+                 **kwargs) -> Tensor:
     """Build nueral network Hamiltonian or overlap dictionary.
 
     Constructs the Hamiltonian or overlap matrix for the target system(s)
@@ -262,7 +267,7 @@ def hs_matrix_nn(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
 
     Arguments:
         geometry: `Geometry` instance associated with the target system(s).
-        basis: `Basis` instance associated with the target system(s).
+        basis: `Shell` instance associated with the target system(s).
         sk_feed: The Slater-Koster feed entity responsible for providing the
             requisite Slater Koster integrals and on-site terms.
 
@@ -301,7 +306,8 @@ def hs_matrix_nn(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
 
     # If add all neighbouring H ans S to central cell
     neig_resolve = kwargs.get('neig_resolve', True)
-    mat_dict = {}
+    train_onsite = kwargs.get('train_onsite', True)
+    mat_dict, onsite_dict = {}, {}
 
     # The device on which the results matrix sits is defined by the geometry
     # object. This choice has been made as such objects are made to be moved
@@ -373,7 +379,7 @@ def hs_matrix_nn(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
             g_vecs = vec_mat_a[[*index_mask_a]]
         else:
             g_dist = dist_mat_a[[*index_mask_a]].T
-            g_dist[g_dist.eq(0)] = 99999
+            g_dist[g_dist.eq(0)] = 999999999
             _g_v = vec_mat_a.permute(0, 2, 3, 4, 1)[[*index_mask_a]]
             g_vecs = _g_v.permute(2, 0, 1).reshape(-1, _g_v.shape[1])
 
@@ -392,11 +398,23 @@ def hs_matrix_nn(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
             g_dist.shape[0], -1, torch.min(l_pair) + 1).transpose(1, 0)
         mat_dict.update({tuple(l_pair.tolist()): mat})
 
-    return mat_dict
+    # Set the onsite terms (diagonal)
+    _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
+
+    # TMP CODE!!!!
+    _dict = ({2: 1.975009233745E-01, 1: -
+             1.499389528184E-01, 0: -3.972859571743E-01})
+    for ii in range(3):
+        nums = len(torch.where(
+            basis.orbs_per_atom.flatten() >= (ii + 1) ** 2)[0])
+        onsite_dict.update(
+            {ii: torch.tensor([_dict[ii]]).repeat(nums, 1)})
+
+    return mat_dict, onsite_dict
 
 
-def hs_matrix_nn2(geometry: Geometry, basis: Basis, sk_feed, hs,
-              **kwargs) -> Tensor:
+def hs_matrix_nn2(geometry: Geometry, basis: Shell, sk_feed, hs,
+                  **kwargs) -> Tensor:
     # If add all neighbouring H ans S to central cell, if neig_resolve, there
     # will be no onsite to the final H or S
     neig_resolve = kwargs.get('neig_resolve', True)
@@ -474,7 +492,7 @@ def hs_matrix_nn2(geometry: Geometry, basis: Basis, sk_feed, hs,
             g_vecs = vec_mat_a[[*index_mask_a]]
         else:
             g_dist = dist_mat_a[[*index_mask_a]].T
-            g_dist[g_dist.eq(0)] = 99999
+            g_dist[g_dist.eq(0)] = 999999999
             _g_v = vec_mat_a.permute(0, 2, 3, 4, 1)[[*index_mask_a]]
             g_vecs = _g_v.permute(2, 0, 1).reshape(-1, _g_v.shape[1])
 
@@ -519,7 +537,7 @@ def hs_matrix_nn2(geometry: Geometry, basis: Basis, sk_feed, hs,
             # mangling.
             r = (r_offset + index_mask_s[-2] * nc).T.flatten().split((
                 nr * nl).tolist())
-            r, _mask = pack(r, value=99, return_mask=True)
+            r, _mask = pack(r, value=999999999, return_mask=True)
             r = r.cpu().sort(stable=True).indices
             # Correct the index list.
             r[1:] = r[1:] + (nl.cumsum(0)[:-1] * nr).unsqueeze(
@@ -577,7 +595,8 @@ def hs_matrix_nn2(geometry: Geometry, basis: Basis, sk_feed, hs,
         ncell = (geometry.ncell / 2).int()
         _onsite = []
         for key, val in hs.items():
-            _val = val[:, torch.arange(val.shape[1]), torch.arange(val.shape[2])]
+            _val = val[:, torch.arange(val.shape[1]),
+                       torch.arange(val.shape[2])]
             mask_nct = torch.stack([torch.arange(val.shape[0]), ncell])
             _onsite.append(_val.permute(0, -1, 1)[mask_nct[0], mask_nct[1]])
         _onsite = torch.stack(_onsite).sum(0)
@@ -594,8 +613,10 @@ def hs_matrix_nn2(geometry: Geometry, basis: Basis, sk_feed, hs,
 
 def add_kpoint(hs_dict: Dict[tuple, Tensor],
                geometry: Geometry,
-               basis: Basis,
+               basis: Shell,
                sk_feed: SkFeed = None,
+               train_onsite: bool = False,
+               hs_onsite: dict = {},
                **kwargs):
     """
     Arguments:
@@ -659,7 +680,7 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
             g_vecs = vec_mat_a[[*index_mask_a]]
         else:
             g_dist = dist_mat_a[[*index_mask_a]].T
-            g_dist[g_dist.eq(0)] = 99999
+            g_dist[g_dist.eq(0)] = 999999999
             _g_v = vec_mat_a.permute(0, 2, 3, 4, 1)[[*index_mask_a]]
             g_vecs = _g_v.permute(2, 0, 1).reshape(-1, _g_v.shape[1])
 
@@ -690,16 +711,17 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
             # mangling.
             r = (r_offset + index_mask_s[-2] * nc).T.flatten().split((
                 nr * nl).tolist())
-            r, _mask = pack(r, value=99, return_mask=True)
+            r, _mask = pack(r, value=999999999, return_mask=True)
             r = r.cpu().sort(stable=True).indices
             # Correct the index list.
             r[1:] = r[1:] + (nl.cumsum(0)[:-1] * nr).unsqueeze(
                 -1).repeat_interleave((r.shape[-1]), dim=-1)
             r = r[_mask]
+
             # The "r" tensor only takes into account the central image, thus
             # the other images must now be taken into account.
             if isperiodic:
-                n = int(sk_data[..., 0].nelement() / (r.nelement() * nr))
+                n = int(sk_data[..., 0].nelement() / int(r.nelement() * nr))
                 r = (r + (torch.arange(n) * len(r)).view(-1, 1)).flatten()
 
             if not isperiodic:
@@ -720,12 +742,20 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
         matc[[*a_mask]] = sk_data  # (ℓ_1, ℓ_2) blocks, i.e. the row blocks
 
         if not isperiodic:
-            matc.transpose(-1, -2)[[*a_mask]] = sk_data  # (ℓ_2, ℓ_1) column-wise
+            # (ℓ_2, ℓ_1) column-wise
+            matc.transpose(-1, -2)[[*a_mask]] = sk_data
         else:
             matc.transpose(-2, -3)[[*a_mask]] = torch.conj(sk_data)
 
     # Set the onsite terms (diagonal)
-    _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
+    if not train_onsite:
+        _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
+    else:
+        _onsite = []
+        for il in range(torch.max(basis.shell_ls).tolist() + 1):
+            _onsite.append(hs_onsite[il].repeat(1, int((2*il+1))))
+        _onsite = torch.cat(_onsite, 1).split(geometry.n_atoms.tolist(), 0)
+        _onsite = pack(_onsite).flatten(1, 2)
 
     if not isperiodic:
         matc.diagonal(0, -2, -1)[:] = matc.diagonal(0, -2, -1)[:] + _onsite
@@ -738,7 +768,7 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
     return matc
 
 
-def _gather_on_site(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
+def _gather_on_site(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
                     **kwargs) -> Tensor:
     """Retrieves on site terms from a target feed in a batch-wise manner.
 
@@ -747,7 +777,7 @@ def _gather_on_site(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
 
     Arguments:
         geometry: `Geometry` instance associated with the target system(s).
-        basis: `Basis` instance associated with the target system(s).
+        basis: `Shell` instance associated with the target system(s).
         sk_feed: The Slater-Koster feed entity responsible for providing the
             requisite Slater Koster integrals and on-site terms.
 
@@ -779,14 +809,13 @@ def _gather_on_site(geometry: Geometry, basis: Basis, sk_feed: SkFeed,
     # Pack results if necessary (code has no effect on single systems)
     c = torch.unique_consecutive((basis.on_atoms != -1).nonzero().T[0],
                                  return_counts=True)[1]
-    return pack(split_by_size(os_flat, c)).view(o_shape)
+    return pack(torch.split(os_flat, tuple(c))).view(o_shape)
 
 
 def _gather_off_site_nn(
         atom_pairs: Tensor, shell_pairs: Tensor, distances: Tensor,
         off_sites: Tensor, isperiodic: bool = False, g_var: Tensor = None,
         **kwargs) -> Tensor:
-
     """Retrieves integrals from a target feed in a batch-wise manner.
 
     This convenience function mediates the integral retrieval operation by
@@ -830,7 +859,8 @@ def _gather_off_site_nn(
     """
     # Block the passing of vectors, which can cause hard to diagnose issues
     if distances.ndim > 2:
-        raise ValueError('Argument "distances" must be a 1d or 2d torch.tensor.')
+        raise ValueError(
+            'Argument "distances" must be a 1d or 2d torch.tensor.')
 
     # Deal with periodic condtions
     if isperiodic:
@@ -899,7 +929,6 @@ def _gather_off_site(
         atom_pairs: Tensor, shell_pairs: Tensor, distances: Tensor,
         sk_feed: SkFeed, isperiodic: bool = False, g_var: Tensor = None,
         **kwargs) -> Tensor:
-
     """Retrieves integrals from a target feed in a batch-wise manner.
 
     This convenience function mediates the integral retrieval operation by
@@ -943,7 +972,8 @@ def _gather_off_site(
     """
     # Block the passing of vectors, which can cause hard to diagnose issues
     if distances.ndim > 2:
-        raise ValueError('Argument "distances" must be a 1d or 2d torch.tensor.')
+        raise ValueError(
+            'Argument "distances" must be a 1d or 2d torch.tensor.')
 
     # Deal with periodic condtions
     if isperiodic:
