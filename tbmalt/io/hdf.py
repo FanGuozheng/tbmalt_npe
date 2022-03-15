@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Load data."""
-from typing import Tuple, Union, Literal
+from typing import Tuple
 from abc import ABC
-import logging
 import json
 import os
+import random
 import scipy
 import scipy.io
 import numpy as np
 import torch
 import ase
-import ase.io as io
 import h5py
 from torch.utils.data import DataLoader, Dataset
 from tbmalt.common.batch import pack
-from tbmalt.structures.geometry import Geometry, to_atomic_numbers, to_element_species
+from tbmalt.structures.geometry import to_atomic_numbers, to_element_species
 ATOMNUM = {'H': 1, 'C': 6, 'N': 7, 'O': 8}
-HIRSH_VOL = [10.31539447, 0., 0., 0., 0., 38.37861207, 29.90025370, 23.60491416]
+HIRSH_VOL = [10.31539447, 0., 0., 0., 0.,
+             38.37861207, 29.90025370, 23.60491416]
 Tensor = torch.Tensor
 
 
@@ -38,7 +38,8 @@ def read_hdf(path_to_hdf: str) -> Tuple[list, list, list]:
             for jkey in f[ikey]:
                 coordinate = f[ikey][jkey]['coordinates'][()]
                 energy = f[ikey][jkey]['energies'][()]
-                specie = [a.decode('utf8') for a in f[ikey][jkey]['species'][()]]
+                specie = [a.decode('utf8')
+                          for a in f[ikey][jkey]['species'][()]]
                 species.append(specie)
                 positions.append(coordinate)
                 energies.append(energy)
@@ -53,7 +54,8 @@ def to_geo(positions: list, species: list, number_mol: list):
         # you can define the name style and the path you prefer
         for ii, mol in enumerate(position[:num]):
             mol_obj = ase.Atoms(specie, mol)
-            ase.io.write(str(mol_obj.symbols) + '.gen.' + str(ii), mol_obj, format='dftb')
+            ase.io.write(str(mol_obj.symbols) + '.gen.' +
+                         str(ii), mol_obj, format='dftb')
 
 
 class AniDataloader:
@@ -78,7 +80,8 @@ class AniDataloader:
                         if type(dataset) is np.ndarray:
                             if dataset.size != 0:
                                 if type(dataset[0]) is np.bytes_:
-                                    dataset = [a.decode('ascii') for a in dataset]
+                                    dataset = [a.decode('ascii')
+                                               for a in dataset]
 
                         data.update({k: dataset})
 
@@ -90,6 +93,7 @@ class AniDataloader:
         """Default class iterator (iterate through all data)."""
         for data in self.iterator(self.input):
             yield data
+
     def size(self):
         count = 0
         for g in self.input.values():
@@ -190,6 +194,9 @@ class LoadHdf(Hdf):
         out_type = kwargs.get('output_type', Tensor)
         test_ratio = kwargs.get('test_ratio', 1.0)
 
+        # Choice about how to select data
+        choice = kwargs.get('choice', 'squeeze')
+
         data = {}
         for ipro in properties:
             data[ipro] = []
@@ -199,6 +206,8 @@ class LoadHdf(Hdf):
         with h5py.File(dataset, 'r') as f:
             gg = f['global_group']
             molecule_specie = gg.attrs['molecule_specie_global']
+
+            # Determine each molecule specie size
             _size = int(size / len(molecule_specie))
 
             # add atom name and atom number
@@ -206,17 +215,40 @@ class LoadHdf(Hdf):
                 g = f[imol_spe]
                 g_size = g.attrs['n_molecule']
                 isize = min(g_size, _size)
-                start = 0 if test_ratio == 1.0 else int(isize * (1 - test_ratio))
 
-                for imol in range(start, isize):  # loop for the same molecule specie
+                if choice == 'squeeze':
+                    start = 0 if test_ratio == 1.0 else int(
+                        isize * (1 - test_ratio))
 
-                    for ipro in properties:  # loop for each property
-                        idata = g[str(imol + 1) + ipro][()]
-                        data[ipro].append(LoadHdf.to_out_type(idata, out_type))
+                    # loop for the same molecule specie
+                    for imol in range(start, isize):
 
-                    _position = g[str(imol + 1) + 'position'][()]
-                    positions.append(LoadHdf.to_out_type(_position, out_type))
-                    numbers.append(LoadHdf.to_out_type(g.attrs['numbers'], out_type))
+                        for ipro in properties:  # loop for each property
+                            idata = g[str(imol + 1) + ipro][()]
+                            data[ipro].append(
+                                LoadHdf.to_out_type(idata, out_type))
+
+                        _position = g[str(imol + 1) + 'position'][()]
+                        positions.append(
+                            LoadHdf.to_out_type(_position, out_type))
+                        numbers.append(LoadHdf.to_out_type(
+                            g.attrs['numbers'], out_type))
+
+                elif choice == 'random':
+                    ind = random.sample(torch.arange(g_size).tolist(), isize)
+                    # loop for the same molecule specie
+                    for imol in ind:
+
+                        for ipro in properties:  # loop for each property
+                            idata = g[str(imol + 1) + ipro][()]
+                            data[ipro].append(
+                                LoadHdf.to_out_type(idata, out_type))
+
+                        _position = g[str(imol + 1) + 'position'][()]
+                        positions.append(
+                            LoadHdf.to_out_type(_position, out_type))
+                        numbers.append(LoadHdf.to_out_type(
+                            g.attrs['numbers'], out_type))
 
         if out_type is Tensor:
             for ipro in properties:  # loop for each property
@@ -255,9 +287,9 @@ class LoadHdf(Hdf):
             # get each molecule specie size
             size_ani = len(data['coordinates'])
             if size_ani > min_size_molecule:
-                print('iadl', iadl, size_ani)
                 isize = min(self.size, size_ani)
-                _spe = to_element_species(torch.from_numpy(data['atomic_numbers']))
+                _spe = to_element_species(
+                    torch.from_numpy(data['atomic_numbers']))
                 # global species
                 for ispe in _spe:
                     if ispe not in atom_specie_global:
@@ -272,7 +304,8 @@ class LoadHdf(Hdf):
 
                 # add atom species in each molecule specie
                 _specie.append(_spe)
-                _number.append(torch.from_numpy(data['atomic_numbers']).squeeze())
+                _number.append(torch.from_numpy(
+                    data['atomic_numbers']).squeeze())
 
         for ispe, isize in enumerate(n_molecule):
             # get symbols of each atom
@@ -310,7 +343,8 @@ class LoadHdf(Hdf):
                 for imol in g.attrs['molecule_specie_global']:
                     print('molecule type:', imol)
                     print('numbers:', f[imol].attrs['numbers'])
-                    print('number of molecules:', f[imol].attrs['n_molecule'])
+                    print('number of molecules:',
+                          f[imol].attrs['n_molecule'])
 
             if 'atom_specie_global' in g.attrs.keys():
                 print('global atom specie:', g.attrs['atom_specie_global'])
@@ -363,7 +397,8 @@ class LoadQM7:
                     natom_ += 1
                     idx = int(iat)
                     ispe = \
-                        list(ATOMNUM.keys())[list(ATOMNUM.values()).index(idx)]
+                        list(ATOMNUM.keys())[
+                            list(ATOMNUM.values()).index(idx)]
                     symbols_.append(ispe)
                     if ispe not in specie_global:
                         specie_global.append(ispe)

@@ -74,6 +74,8 @@ def hs_matrix(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
     dtype = geometry.positions.dtype if not geometry.isperiodic else \
         torch.complex128
     isperiodic = geometry.isperiodic
+    train_onsite = kwargs.get('train_onsite', None)
+    orbital_expand = kwargs.get('orbital_expand', True)
 
     if not isperiodic:
         mat = torch.zeros(basis.orbital_matrix_shape,  # <- Results matrix
@@ -235,12 +237,28 @@ def hs_matrix(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
         mat[[*a_mask]] = sk_data  # (ℓ_1, ℓ_2) blocks, i.e. the row blocks
 
         if not isperiodic:
-            mat.transpose(-1, -2)[[*a_mask]] = sk_data  # (ℓ_2, ℓ_1) column-wise
+            # (ℓ_2, ℓ_1) column-wise
+            mat.transpose(-1, -2)[[*a_mask]] = sk_data
         else:
             mat.transpose(-2, -3)[[*a_mask]] = torch.conj(sk_data)
 
     # Set the onsite terms (diagonal)
-    _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
+    if train_onsite != 'local':
+        _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
+    elif train_onsite == 'local' and orbital_expand:
+        _onsite = sk_feed.on_site_dict['ml_onsite']
+    elif train_onsite == 'local' and not orbital_expand:
+        _onsite = sk_feed.on_site_dict['ml_onsite']
+
+        # Repeat p, d orbitals from 1 to 3, 5...
+        _onsite = torch.repeat_interleave(
+            _onsite, basis.orbs_per_shell[basis.orbs_per_shell.ne(0)])
+
+        # Pack results if necessary (code has no effect on single systems)
+        c = torch.unique_consecutive((basis.on_atoms != -1).nonzero().T[0],
+                                     return_counts=True)[1]
+        _onsite = pack(torch.split(_onsite, tuple(c))).view(
+            basis.orbital_matrix_shape[:-1])
 
     if not isperiodic:
         mat.diagonal(0, -2, -1)[:] = mat.diagonal(0, -2, -1)[:] + _onsite
@@ -305,8 +323,6 @@ def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
     # matrices for rather than recomputing them every time.
 
     # If add all neighbouring H ans S to central cell
-    neig_resolve = kwargs.get('neig_resolve', True)
-    train_onsite = kwargs.get('train_onsite', True)
     mat_dict, onsite_dict = {}, {}
 
     # The device on which the results matrix sits is defined by the geometry
@@ -330,7 +346,6 @@ def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
         # l_mat_f = basis.azimuthal_matrix(mask_diag=True, mask_on_site=True)
         l_mat_s = basis.azimuthal_matrix('shell', mask_on_site=True)
     else:
-        l_mat_f = basis.azimuthal_matrix(mask_diag=False, mask_on_site=False)
         l_mat_s = basis.azimuthal_matrix('shell', mask_on_site=True)
         l_mat_s = basis.azimuthal_matrix('shell', mask_on_site=False)
 
@@ -352,7 +367,8 @@ def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
         # Standard periodic H ans S generations, add all neighbouring cells to
         # central cell and consider all the phase factors
         else:
-            mat = torch.zeros(*geometry.distances.shape, torch.min(l_pair) + 1)
+            mat = torch.zeros(*geometry.distances.shape,
+                              torch.min(l_pair) + 1)
 
         # Mask identifying indices associated with the current l_pair target
         index_mask_s = torch.nonzero((l_mat_s == l_pair).all(dim=-1)).T
@@ -381,7 +397,6 @@ def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
             g_dist = dist_mat_a[[*index_mask_a]].T
             g_dist[g_dist.eq(0)] = 999999999
             _g_v = vec_mat_a.permute(0, 2, 3, 4, 1)[[*index_mask_a]]
-            g_vecs = _g_v.permute(2, 0, 1).reshape(-1, _g_v.shape[1])
 
         # gather multi_varible
         g_var = _gether_var(multi_varible, index_mask_a)
@@ -415,10 +430,6 @@ def hs_matrix_nn(geometry: Geometry, basis: Shell, sk_feed: SkFeed,
 
 def hs_matrix_nn2(geometry: Geometry, basis: Shell, sk_feed, hs,
                   **kwargs) -> Tensor:
-    # If add all neighbouring H ans S to central cell, if neig_resolve, there
-    # will be no onsite to the final H or S
-    neig_resolve = kwargs.get('neig_resolve', True)
-    # If add phase to the H or S
     add_kpoint = kwargs.get('add_kpoint', True)
     dftb_onsite = kwargs.get('dftb_onsite', True)
 
@@ -436,13 +447,6 @@ def hs_matrix_nn2(geometry: Geometry, basis: Shell, sk_feed, hs,
         n_kpoints = torch.max(geometry.n_kpoints)
         mat = torch.zeros(*basis.orbital_matrix_shape, n_kpoints,
                           device=geometry.positions.device, dtype=dtype)
-
-    # The multi_varible offer multi-dimensional interpolation and gather of
-    # integrals, the default will be 1D interpolation only with distances
-    multi_varible = kwargs.get('multi_varible', None)
-
-    # True of the hamiltonian is square (used for safety checks)
-    # mat_is_square = mat.shape[-1] == mat.shape[-2]
 
     # Matrix Initialisation, matrix indice for full, block, or shell ...
     # include indice belong to which batch, which the 1st, 2nd atoms are ...
@@ -574,7 +578,8 @@ def hs_matrix_nn2(geometry: Geometry, basis: Shell, sk_feed, hs,
         mat[[*a_mask]] = sk_data  # (ℓ_1, ℓ_2) blocks, i.e. the row blocks
 
         if not isperiodic:
-            mat.transpose(-1, -2)[[*a_mask]] = sk_data  # (ℓ_2, ℓ_1) column-wise
+            # (ℓ_2, ℓ_1) column-wise
+            mat.transpose(-1, -2)[[*a_mask]] = sk_data
         else:
             mat.transpose(-2, -3)[[*a_mask]] = torch.conj(sk_data)
 
@@ -584,7 +589,8 @@ def hs_matrix_nn2(geometry: Geometry, basis: Shell, sk_feed, hs,
         mat[[*a_mask]] = sk_data  # (ℓ_1, ℓ_2) blocks, i.e. the row blocks
 
         if not isperiodic:
-            mat.transpose(-1, -2)[[*a_mask]] = sk_data  # (ℓ_2, ℓ_1) column-wise
+            # (ℓ_2, ℓ_1) column-wise
+            mat.transpose(-1, -2)[[*a_mask]] = sk_data
         else:
             mat.transpose(-2, -3)[[*a_mask]] = torch.conj(sk_data)
 
@@ -615,7 +621,6 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
                geometry: Geometry,
                basis: Shell,
                sk_feed: SkFeed = None,
-               train_onsite: bool = False,
                hs_onsite: dict = {},
                **kwargs):
     """
@@ -624,11 +629,11 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
             n_kpoint is for periodic system, m equals the min(l).
 
     """
-    neig_resolve = kwargs.get('neig_resolve', True)
     isperiodic = geometry.isperiodic
     n_kpoints = torch.max(geometry.n_kpoints)
     matc = torch.zeros(*basis.orbital_matrix_shape, n_kpoints,
                        dtype=torch.complex128)
+    train_onsite = kwargs.get('train_onsite', None)
 
     # Matrix Initialisation, matrix indice for full, block, or shell ...
     # include indice belong to which batch, which the 1st, 2nd atoms are ...
@@ -642,8 +647,6 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
         l_mat_s = basis.azimuthal_matrix('shell', mask_on_site=False)
 
     i_mat_s = basis.index_matrix('shell')
-    an_mat_a = basis.atomic_number_matrix('atomic')
-    sn_mat_s = basis.shell_number_matrix('shell')
     sn_mat_max = basis.shell_number_matrix('atomic')
     dist_mat_a = geometry.distances
     vec_mat_a = -normalize(geometry.distance_vectors, 2, -1)  # Unit vectors
@@ -666,15 +669,10 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
         if len(index_mask_s[0]) == 0:  # Skip if no l_pair blocks are found
             continue
 
-        # Gather shell numbers associated with the selected (masked) orbitals
-        shell_pairs = sn_mat_s[[*index_mask_s]]
-
         # Gather from i_mat_s to get the atom index mask.
         index_mask_a = index_mask_s.clone()  # <- batch agnostic approach
         index_mask_a[-2:] = i_mat_s[[*index_mask_s]].T
 
-        # Gather the atomic numbers, distances, and unit vectors.
-        g_anum = an_mat_a[[*index_mask_a]]
         if not isperiodic:
             g_dist = dist_mat_a[[*index_mask_a]]
             g_vecs = vec_mat_a[[*index_mask_a]]
@@ -748,7 +746,7 @@ def add_kpoint(hs_dict: Dict[tuple, Tensor],
             matc.transpose(-2, -3)[[*a_mask]] = torch.conj(sk_data)
 
     # Set the onsite terms (diagonal)
-    if not train_onsite:
+    if train_onsite != 'local':
         _onsite = _gather_on_site(geometry, basis, sk_feed, **kwargs)
     else:
         _onsite = []
@@ -879,7 +877,6 @@ def _gather_off_site_nn(
 
     # Identify all unique [atom|atom|shell|shell] sets.
     as_pairs = torch.cat((atom_pairs, shell_pairs), -1)
-    _shell_pairs = shell_pairs  # Should repeat in the future
     as_pairs_u = as_pairs.unique(dim=0)
 
     # If "atom_indices" was passed, make sure only the relevant atom indices
@@ -895,13 +892,6 @@ def _gather_off_site_nn(
     for as_pair in as_pairs_u:
         # Construct an index mask for gather & scatter operations
         mask = torch.where((as_pairs == as_pair).all(1))[0]
-
-        # Select the required atom indices (if applicable)
-        ai_select = atom_indices.T[mask] if atom_indices is not None else None
-
-        # Retrieve the integrals & assign them to the "integrals" tensor. The
-        # SkFeed class requires all arguments to be passed in as keywords.
-        var = None if g_var is None else g_var[mask]
 
         # The result tensor's shape cannot be *safely* identified prior to the
         # first sk_feed call, thus it must be instantiated in the first loop.

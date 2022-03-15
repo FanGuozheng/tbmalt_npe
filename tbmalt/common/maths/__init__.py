@@ -389,7 +389,8 @@ def _eig_sort_out(w: Tensor, v: Tensor, ghost: bool = True
     # Fix the order of the eigen values and eigen vectors.
     w = w[sorted_indices].reshape(w.shape)
     # Reshaping is needed to allow sorted_indices to be used for 2D & 3D
-    v = v.transpose(-1, -2)[sorted_indices].reshape(v.shape).transpose(-1, -2)
+    v = v.transpose(-1, -
+                    2)[sorted_indices].reshape(v.shape).transpose(-1, -2)
 
     # Return the eigenvalues and eigenvectors
     return w, v
@@ -532,9 +533,6 @@ def eighb(a: Tensor,
     func = _SymEigB.apply if broadening_method else torch.linalg.eigh
     # Set up for the arguments
     args = (broadening_method, factor) if broadening_method else (True,)
-    iscomplex = True if b.dtype in (torch.complex32,
-                                    torch.complex64,
-                                    torch.complex128) else False
 
     if aux:
         # Convert from zero-padding to identity padding

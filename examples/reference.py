@@ -26,13 +26,15 @@ assert os.path.isdir(path_to_aims_specie), f'{path_to_aims_specie}' + \
 # For dftb, the dataset is too huge, the link to download dataset is here:
 # https://springernature.figshare.com/collections/The_ANI-1ccx_and_ANI-1x_data_sets_coupled-cluster_and_density_functional_theory_properties_for_molecules/4712477
 if task == 'dftbplus':
-    path_to_dftbplus = os.path.join(os.getcwd(), '../tests/unittests/dftbplus/dftb+')
+    path_to_dftbplus = os.path.join(
+        os.getcwd(), '../tests/unittests/dftbplus/dftb+')
     path_to_input = '../../database/ani1x-release.h5'
     path_to_skf = os.path.join(
         os.getcwd(), '../tests/unittests/data/slko/mio/')
     assert os.path.isfile(path_to_dftbplus), 'There is no executable ' + \
         f'binary DFTB+ named `dftb+` in {path_to_dftbplus}'
-    assert os.path.isfile(path_to_input), f'file {path_to_input} is not found'
+    assert os.path.isfile(
+        path_to_input), f'file {path_to_input} is not found'
     assert os.path.isdir(path_to_skf), f'{path_to_skf} is not found.'
 
 
@@ -70,7 +72,7 @@ def dftbplus(device):
     properties = ['charge', 'homo_lumo', 'energy']
     dataset_type = 'ANIx'
     # How many to calculate, how many to load for test
-    n_per_mol, reference_size = 100, 1000
+    n_per_mol, reference_size = 10, 100
     periodic = False
     calculator = 'dftbplus'
     output_name = 'dftb.hdf'

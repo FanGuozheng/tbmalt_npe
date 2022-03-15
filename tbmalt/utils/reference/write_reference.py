@@ -3,7 +3,6 @@
 The skf include normal skf files or skf with a list of compression radii.
 """
 import h5py
-import torch
 import numpy as np
 from tbmalt.io.hdf import LoadHdf
 from tbmalt.utils.ase.ase_aims import AseAims
@@ -38,7 +37,8 @@ class CalReference:
 
         elif self.calculator == 'aims':
             self.path_to_aims = kwargs.get('path_to_aims', './aims.x')
-            self.path_to_aims_specie = kwargs.get('path_to_aims_specie', './')
+            self.path_to_aims_specie = kwargs.get(
+                'path_to_aims_specie', './')
 
         dataset = self._load_input(size)
         self.numbers = dataset.numbers
@@ -65,13 +65,16 @@ class CalReference:
 
         """
         if self.calculator == 'aims':
-            aims = AseAims(self.path_to_aims, self.path_to_aims_specie, periodic=self.periodic)
-            result = aims.run_aims(self.positions, self.symbols, self.latvecs, properties)
+            aims = AseAims(self.path_to_aims,
+                           self.path_to_aims_specie, periodic=self.periodic)
+            result = aims.run_aims(
+                self.positions, self.symbols, self.latvecs, properties)
 
         elif self.calculator == 'dftbplus':
             dftb = AseDftb(self.path_to_dftbplus, self.path_to_skf,
                            properties, **kwargs)
-            result = dftb.run_dftb(self.positions, self.symbols, self.latvecs, properties)
+            result = dftb.run_dftb(
+                self.positions, self.symbols, self.latvecs, properties)
         return result
 
     @classmethod
@@ -130,11 +133,14 @@ class CalReference:
                 else:
                     g = f[''.join(isys)]
 
-                n_system = g.attrs['n_molecule']  # each molecule specie number
+                # each molecule specie number
+                n_system = g.attrs['n_molecule']
                 g.attrs['n_molecule'] = n_system + 1
-                g.create_dataset(str(n_system + 1) + 'position', data=positions[ii])
+                g.create_dataset(str(n_system + 1) +
+                                 'position', data=positions[ii])
                 if dataset_type == 'Si':
-                    g.create_dataset(str(n_system + 1) + 'lattice vector', data=latvec[ii])
+                    g.create_dataset(str(n_system + 1) +
+                                     'lattice vector', data=latvec[ii])
 
                 for iproperty in properties:
                     iname = str(n_system + 1) + iproperty

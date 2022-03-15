@@ -17,11 +17,14 @@ class SciKitLearn:
     """
 
     def __init__(self, system_train, system_pred, x_train, y_train, x_test,
-                 bpnn=True, form='geometry', **kwargs):
+                 bpnn=False, form='geometry', **kwargs):
         """Initialize."""
-        assert x_train.dim() == 2, f'dim of x_train should be 2, get {x_train.dim()}'
-        assert x_test.dim() == 2, f'dim of x_test should be 2, get {x_test.dim()}'
-        assert y_train.dim() == 2, f'dim of y_train should be 2, get {y_train.dim()}'
+        assert x_train.dim(
+        ) == 2, f'dim of x_train should be 2, get {x_train.dim()}'
+        assert x_test.dim(
+        ) == 2, f'dim of x_test should be 2, get {x_test.dim()}'
+        assert y_train.dim(
+        ) == 2, f'dim of y_train should be 2, get {y_train.dim()}'
         self.bpnn = bpnn
         self.form = form
         if self.bpnn:
@@ -29,15 +32,14 @@ class SciKitLearn:
         self.save_model = kwargs.get('save_model', False)
 
         self.ml_method = kwargs.get('ml_method', 'linear')
-        self.split = kwargs.get('split', 0.5)
-
 
         if not self.bpnn:
             size_sys = system_pred.n_atoms
             size_sys_train = system_train.n_atoms
             self.x_train = x_train
             self.y_train = y_train
-            self.sum_size_test = [sum(size_sys[: ii]) for ii in range(len(size_sys) + 1)]
+            self.sum_size_test = [sum(size_sys[: ii])
+                                  for ii in range(len(size_sys) + 1)]
             self.sum_size_train = [sum(size_sys_train[: ii])
                                    for ii in range(len(size_sys_train) + 1)]
             self.x_test = x_test
@@ -46,8 +48,10 @@ class SciKitLearn:
         else:
             self.uan = system_train.unique_atomic_numbers()
             assert (self.uan == system_pred.unique_atomic_numbers()).all()
-            self.train_numbers = system_train.atomic_numbers[system_train.atomic_numbers.ne(0)]
-            self.test_numbers = system_pred.atomic_numbers[system_pred.atomic_numbers.ne(0)]
+            self.train_numbers = system_train.atomic_numbers[system_train.atomic_numbers.ne(
+                0)]
+            self.test_numbers = system_pred.atomic_numbers[system_pred.atomic_numbers.ne(
+                0)]
             self.prediction, self.model = [], []
             for iuan in self.uan:
                 self.x_test = x_test[self.test_numbers == iuan]
@@ -120,13 +124,15 @@ class SciKitLearn:
 
     def grad_boost(self):
         """ML process with support vector machine method."""
-        self.reg = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1)
+        self.reg = GradientBoostingRegressor(
+            n_estimators=100, learning_rate=0.1)
         size_sys = self.system.n_atoms
         self.reg.fit(self.x_train, self.y_train)
         y_pred = torch.from_numpy(self.reg.predict(self.feature))
 
         if self.form == 'geometry':
-            sum_size = [sum(size_sys[: ii]) for ii in range(len(size_sys) + 1)]
+            sum_size = [sum(size_sys[: ii])
+                        for ii in range(len(size_sys) + 1)]
             return pack([y_pred[isize: sum_size[ii + 1]] for ii, isize in
                          enumerate(sum_size[: -1])]), self.reg
         else:

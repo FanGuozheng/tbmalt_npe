@@ -122,22 +122,23 @@ class Dftb(nn.Module):
 
     def _update_shift(self, this: dict, charge: Tensor = None):
         """Update shift."""
-        _charge = self.charge if charge is None else charge
-        return torch.einsum('ij, ijk-> ik',
-                            (_charge - self.qzero)[this['mask']],
-                            self.shift[this['mask']])
+        _charge = self._charge if charge is None else charge
+        return torch.einsum(
+            'ij, ijk-> ik',
+            (_charge - self.qzero)[this['mask']], self.shift[this['mask']])
 
     def forward(self, hamiltonian, overlap, this):
         """A template for DFTB forward calculations."""
         # calculate the eigen-values & vectors via a Cholesky decomposition
         if self.isperiodic:
-            self.ie, eigvec, nocc, density, q_new = [], [], [], [], []
+            self.ie, eigvec, density, q_new = [], [], [], []
             self._mask_k = []
             # Loop over all K-points
             for ik in range(self.max_nk):
 
                 # calculate the eigen-values & vectors
-                iep, ieig = maths.eighb(hamiltonian[..., ik], overlap[..., ik])
+                iep, ieig = maths.eighb(
+                    hamiltonian[..., ik], overlap[..., ik])
 
                 Ef = fermi_search(
                     eigenvalues=iep,
@@ -152,12 +153,13 @@ class Dftb(nn.Module):
                     iep, ieig, self.over[..., ik],
                     this, ik, torch.max(self.periodic.n_kpoints))
 
-                irho = (torch.conj(iden) @ iden.transpose(1, 2))  # -> density
+                irho = (torch.conj(iden) @ iden.transpose(1, 2))
                 density.append(irho)
 
                 # calculate mulliken charges for each system in batch
-                iq = mulliken(self.over[this['mask'], :this['size'], :this['size'], ik],
-                              irho, self.atom_orbitals[this['mask']])
+                iq = mulliken(self.over[
+                    this['mask'], :this['size'], :this['size'], ik],
+                    irho, self.atom_orbitals[this['mask']])
                 _q = iq.real
                 q_new.append(_q)
 
@@ -297,10 +299,12 @@ class Dftb(nn.Module):
         if this['iter'] == 0:
             if ik is None:
                 # self._epsilon = torch.zeros(*epsilon.shape)
-                self.eigenvector = torch.zeros(*eigvec.shape, dtype=self.dtype)
+                self.eigenvector = torch.zeros(
+                    *eigvec.shape, dtype=self.dtype)
             elif ik == 0:
                 self.epsilon = torch.zeros(*epsilon.shape)
-                self.eigenvector = torch.zeros(*eigvec.shape, dtype=self.dtype)
+                self.eigenvector = torch.zeros(
+                    *eigvec.shape, dtype=self.dtype)
 
         if ik is None:
             # self._epsilon[self.mask, :epsilon.shape[1]] = epsilon
@@ -401,7 +405,7 @@ class Dftb(nn.Module):
     @property
     def coulomb_energy(self) -> Tensor:
         """Calculate Coulomb energy (atom resolved charge)."""
-        _q = self.charge - self.qzero
+        _q = self._charge - self.qzero
         deltaq = _q.unsqueeze(1) * _q.unsqueeze(2)
         return 0.5 * (self.shift * deltaq).sum((-1, -2))
 
@@ -468,7 +472,7 @@ class Dftb(nn.Module):
 
 
 class Dftb1(Dftb):
-    """Density-functional tight-binding method without high order correction."""
+    """Density-functional tight-binding method with zero order correction."""
 
     def __init__(self,
                  geometry: object,
@@ -509,12 +513,14 @@ class Dftb1(Dftb):
         # Mask is noly for consistency with batch SCC-method
         self.mask = torch.tensor([True]).repeat(self._n_batch)
         super().__hs__(hamiltonian, overlap, **kwargs)
-        this = {'iter': 0, 'size': hamiltonian.shape[-1]}
+        this = {'iter': 0, 'size': self.ham.shape[-1],
+                'mask': torch.ones(len(self.ham), dtype=torch.bool)}
 
         # One diagonalization with given charges
         if charge is not None:
+            self._charge = charge
             self.shift = self._get_shift()
-            _, shift_mat, H, S = super()._second_order_ham(charge)
+            _, shift_mat, H, S = super()._second_order_ham(this)
             charge_mul = super().forward(H, S, this)
 
         # Standard non-SCC-DFTB
@@ -618,7 +624,8 @@ class Dftb2(Dftb):
         elif unit in ('hartree', 'Hartree'):
             return torch.linspace(e_min, e_max, grid) * _Hartree__eV
         else:
-            raise ValueError('unit of energy in DOS should be eV or Hartree.')
+            raise ValueError(
+                'unit of energy in DOS should be eV or Hartree.')
 
     @property
     def pdos(self):

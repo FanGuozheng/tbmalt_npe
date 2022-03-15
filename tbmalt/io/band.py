@@ -23,7 +23,8 @@ def read_band(file: str) -> Tensor:
                     band.append(float(ii[1]))
 
             # return shape as: [n_kpoints, n_eigenstates]
-            band = torch.from_numpy(np.asarray(band)).reshape(-1, max(number))
+            band = torch.from_numpy(np.asarray(
+                band)).reshape(-1, max(number))
     except:
         raise IOError(f'can not read {file}')
 

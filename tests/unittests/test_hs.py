@@ -11,7 +11,7 @@ import pytest
 import numpy as np
 from ase.build import molecule
 from torch.autograd import gradcheck
-from tbmalt import Geometry, Basis, SkfFeed, SkfParamFeed
+from tbmalt import Geometry, Shell, SkfFeed, SkfParamFeed
 from tbmalt.physics.dftb.slaterkoster import hs_matrix
 from tbmalt.structures.periodic import Periodic
 from tbmalt.common.batch import pack
@@ -27,7 +27,8 @@ def _get_matrix(filename, device, in_type='txt'):
         return torch.from_numpy(np.loadtxt(filename)).to(device)
     else:
         text = ''.join(open(filename, 'r').readlines())
-        string = re.search('(?<=MATRIX\n).+(?=\n)', text, flags=re.DOTALL).group(0)
+        string = re.search('(?<=MATRIX\n).+(?=\n)', text,
+                           flags=re.DOTALL).group(0)
         return torch.tensor([[float(i) for i in row.split()]
                              for row in string.split('\n')]).to(device)
 
@@ -39,7 +40,7 @@ def test_hs_single_npe(device):
     path_sk = './tests/unittests/data/slko/mio'
     mol = molecule('CH4')
     geometry = Geometry.from_ase_atoms(mol, device=device)
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -112,8 +113,10 @@ def test_h2_pe(device):
     """Test single Hamiltonian and overlap after SK transformations."""
     h_h2 = _get_matrix('./tests/unittests/data/sk/h2/hamsqr1.dat.pe', device)
     s_h2 = _get_matrix('./tests/unittests/data/sk/h2/oversqr.dat.pe', device)
-    h_h22 = _get_matrix('./tests/unittests/data/sk/h2/hamsqr1.dat.pe2', device)
-    s_h22 = _get_matrix('./tests/unittests/data/sk/h2/oversqr.dat.pe2', device)
+    h_h22 = _get_matrix(
+        './tests/unittests/data/sk/h2/hamsqr1.dat.pe2', device)
+    s_h22 = _get_matrix(
+        './tests/unittests/data/sk/h2/oversqr.dat.pe2', device)
     path_sk = './tests/unittests/data/slko/mio'
     kpoints = torch.tensor([1, 1, 1])
     kpoints2 = torch.tensor([1, 2, 2])
@@ -122,13 +125,13 @@ def test_h2_pe(device):
     geometry = Geometry(torch.tensor([[1, 1]]), torch.tensor([[
         [0, 0, 0], [0, 0, 0.6]]]), cell=torch.eye(3).unsqueeze(0) * 6.0,
         units='angstrom')
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
     geometry2 = Geometry(
         torch.tensor([[1, 1, 1]]), torch.tensor([[
             [0, 0, 0], [0, 0, 0.6], [0, 0, 1.2]]]),
         cell=torch.eye(3).unsqueeze(0) * 6.0,
         units='angstrom')
-    basis2 = Basis(geometry2.atomic_numbers, shell_dict)
+    basis2 = Shell(geometry2.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -151,7 +154,8 @@ def test_h2_pe(device):
     ind_r = torch.arange(0, h_h2.shape[-1], 2)
     ind_r2 = torch.arange(0, h_h22.shape[-1], 2)
     check_h_r = torch.max(abs(ham.real.squeeze() - h_h2[..., ind_r])) < 1E-14
-    check_s_r = torch.max(abs(over.real.squeeze() - s_h2[..., ind_r])) < 1E-11
+    check_s_r = torch.max(
+        abs(over.real.squeeze() - s_h2[..., ind_r])) < 1E-11
     check_ih_r = torch.max(
         abs(ham.imag.squeeze() - h_h2[..., ind_r + 1])) < 1E-14
     check_is_r = torch.max(abs(
@@ -179,8 +183,10 @@ def test_h2_pe(device):
 
 def test_h2o_pe(device):
     """Test single Hamiltonian and overlap after SK transformations."""
-    h_h2o = _get_matrix('./tests/unittests/data/sk/h2o/hamsqr1.dat.pe', device)
-    s_h2o = _get_matrix('./tests/unittests/data/sk/h2o/oversqr.dat.pe', device)
+    h_h2o = _get_matrix(
+        './tests/unittests/data/sk/h2o/hamsqr1.dat.pe', device)
+    s_h2o = _get_matrix(
+        './tests/unittests/data/sk/h2o/oversqr.dat.pe', device)
     h_h2 = _get_matrix('./tests/unittests/data/sk/h2/hamsqr1.dat.pe', device)
     s_h2 = _get_matrix('./tests/unittests/data/sk/h2/oversqr.dat.pe', device)
     path_sk = './tests/unittests/data/slko/mio'
@@ -188,7 +194,7 @@ def test_h2o_pe(device):
     geometry = Geometry(torch.tensor([[8, 1, 1], [1, 1, 0]]), torch.tensor([[
         [0, 0, 0], [0, 0.6, 0], [0, 0., 0.6]], [[0, 0, 0], [0, 0, 0.6], [0, 0, 0]]]),
         cell=torch.eye(3).unsqueeze(0).repeat(2, 1, 1) * 6.0, units='angstrom')
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -239,14 +245,22 @@ def test_si_pe(device):
     """Test single Hamiltonian and overlap after SK transformations."""
     hr = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat', device)
     sr = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat', device)
-    hr_pe = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat.pe', device)
-    sr_pe = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat.pe', device)
-    hr_pe2 = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat.pe2', device)
-    sr_pe2 = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat.pe2', device)
-    hr_pe3 = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat.pe3', device)
-    sr_pe3 = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat.pe3', device)
-    hr_pe5 = _get_matrix('./tests/unittests/data/sk/si/hamsqr1.dat.pe5', device)
-    sr_pe5 = _get_matrix('./tests/unittests/data/sk/si/oversqr.dat.pe5', device)
+    hr_pe = _get_matrix(
+        './tests/unittests/data/sk/si/hamsqr1.dat.pe', device)
+    sr_pe = _get_matrix(
+        './tests/unittests/data/sk/si/oversqr.dat.pe', device)
+    hr_pe2 = _get_matrix(
+        './tests/unittests/data/sk/si/hamsqr1.dat.pe2', device)
+    sr_pe2 = _get_matrix(
+        './tests/unittests/data/sk/si/oversqr.dat.pe2', device)
+    hr_pe3 = _get_matrix(
+        './tests/unittests/data/sk/si/hamsqr1.dat.pe3', device)
+    sr_pe3 = _get_matrix(
+        './tests/unittests/data/sk/si/oversqr.dat.pe3', device)
+    hr_pe5 = _get_matrix(
+        './tests/unittests/data/sk/si/hamsqr1.dat.pe5', device)
+    sr_pe5 = _get_matrix(
+        './tests/unittests/data/sk/si/oversqr.dat.pe5', device)
 
     path_sk = './tests/unittests/data/slko'
     kpoints = torch.tensor([[1, 1, 1]])
@@ -260,7 +274,7 @@ def test_si_pe(device):
         torch.tensor([[
             [0., 0.,  0.], [0.1356773E+01, 0.13567730000E+01, 0.13567730000E+01]]]),
         units='angstrom')
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # Periodic geometry
     geometry_pe = Geometry(
@@ -270,7 +284,7 @@ def test_si_pe(device):
         cell=torch.tensor([[
             [6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]]]),
         units='angstrom')
-    basis_pe = Basis(geometry_pe.atomic_numbers, shell_dict)
+    basis_pe = Shell(geometry_pe.atomic_numbers, shell_dict)
 
     # Periodic geometry
     geometry_pe2 = Geometry(
@@ -280,7 +294,7 @@ def test_si_pe(device):
             [2.713546, 2.713546, 0.0], [0.0, 2.713546, 2.713546],
             [2.713546, 0.0, 2.713546]]]),
         units='angstrom')
-    basis_pe2 = Basis(geometry_pe2.atomic_numbers, shell_dict)
+    basis_pe2 = Shell(geometry_pe2.atomic_numbers, shell_dict)
 
     # Batch periodic
     geometry_pe4 = Geometry(
@@ -292,7 +306,7 @@ def test_si_pe(device):
             [2.713546, 0.0, 2.713546]],
             [[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]]]),
         units='angstrom')
-    basis_pe4 = Basis(geometry_pe4.atomic_numbers, shell_dict)
+    basis_pe4 = Shell(geometry_pe4.atomic_numbers, shell_dict)
 
     # Klines
     geometry_pe5 = Geometry(
@@ -302,7 +316,7 @@ def test_si_pe(device):
             [2.713546, 2.713546, 0.0], [0.0, 2.713546, 2.713546],
             [2.713546, 0.0, 2.713546]]]),
         units='angstrom')
-    basis_pe5 = Basis(geometry_pe5.atomic_numbers, shell_dict)
+    basis_pe5 = Shell(geometry_pe5.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -496,12 +510,14 @@ def test_si_pe(device):
 
 def test_ch3cho(device):
     """Test CH3CHO."""
-    h_ch3cho = _get_matrix('./tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
-    s_ch3cho = _get_matrix('./tests/unittests/data/sk/ch3cho/oversqr.dat', device)
+    h_ch3cho = _get_matrix(
+        './tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
+    s_ch3cho = _get_matrix(
+        './tests/unittests/data/sk/ch3cho/oversqr.dat', device)
     geometry = Geometry.from_ase_atoms([molecule('CH3CHO')])
 
     path_sk = './tests/unittests/data/slko/mio'
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -528,8 +544,10 @@ def test_ch3cho(device):
 
 def test_tio2(device):
     """Test TiO2."""
-    h_tio2 = _get_matrix('./tests/unittests/data/sk/tio2/hamsqr1.dat', device)
-    s_tio2 = _get_matrix('./tests/unittests/data/sk/tio2/oversqr.dat', device)
+    h_tio2 = _get_matrix(
+        './tests/unittests/data/sk/tio2/hamsqr1.dat', device)
+    s_tio2 = _get_matrix(
+        './tests/unittests/data/sk/tio2/oversqr.dat', device)
     geometry = Geometry(
         torch.tensor([[22, 22, 8, 8, 8, 8]]),
         torch.tensor([[
@@ -547,7 +565,7 @@ def test_tio2(device):
 
     path_sk = './tests/unittests/data/slko/tiorg'
     kpoints = torch.tensor([[1, 1, 1]])
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -591,7 +609,7 @@ def test_hs_matrix_hdf_npe(device):
     path_skf = './tests/unittests/data/slko/mio.hdf'
     mol = molecule('CH4')
     geometry = Geometry.from_ase_atoms(mol, device=device)
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build single Hamiltonian and overlap feeds
     h_feed = SkfFeed.from_dir(
@@ -619,12 +637,14 @@ def test_hs_matrix_batch_npe(device):
     """Test batch Hamiltonian and overlap after SK transformations."""
     h_ch4 = _get_matrix('./tests/unittests/data/sk/ch4/hamsqr1.dat', device)
     s_ch4 = _get_matrix('./tests/unittests/data/sk/ch4/oversqr.dat', device)
-    h_c2h4 = _get_matrix('./tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
-    s_c2h4 = _get_matrix('./tests/unittests/data/sk/ch3cho/oversqr.dat', device)
+    h_c2h4 = _get_matrix(
+        './tests/unittests/data/sk/ch3cho/hamsqr1.dat', device)
+    s_c2h4 = _get_matrix(
+        './tests/unittests/data/sk/ch3cho/oversqr.dat', device)
     path_skf = './tests/unittests/data/slko/mio.hdf'
     geometry = Geometry.from_ase_atoms([
         molecule('CH4'), molecule('CH3CHO')], device=device)
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
 
     # build Hamiltonian and overlap tables feed from original SKF files
     h_feed = SkfFeed.from_dir(
@@ -659,7 +679,7 @@ def test_hs_matrix_grad(device):
     mol = molecule('CH4')
     path_to_skf = './tests/unittests/data/slko/mio'
     geometry = Geometry.from_ase_atoms(mol, device=device)
-    basis = Basis(geometry.atomic_numbers, shell_dict)
+    basis = Shell(geometry.atomic_numbers, shell_dict)
     h_feed = SkfFeed.from_dir(
         path_to_skf, shell_dict, skf_type='skf', geometry=geometry,
         interpolation='Spline1d', integral_type='H', build_abcd=True)
@@ -677,7 +697,7 @@ def test_hs_matrix_grad(device):
         *h_feed.off_site(torch.tensor([6, 6]),
                          torch.tensor([0, 1]),
                          torch.tensor([2.0, 3.0])),
-        )
+    )
     args = (s_feed.off_site(torch.tensor([6, 6]),
                             torch.tensor([0, 0]),
                             torch.tensor([2.5])))

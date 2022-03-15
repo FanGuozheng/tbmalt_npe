@@ -11,7 +11,7 @@ from tbmalt.physics.filling import (
     fermi_entropy, gaussian_entropy
 )
 from tbmalt.common.batch import pack
-from tbmalt import Basis
+from tbmalt import Shell
 
 torch.set_default_dtype(torch.float64)
 
@@ -24,7 +24,8 @@ np.seterr(over='ignore')
 # Test Data #
 #############
 def H2(device):
-    e_vals = torch.tensor([-0.3405911944959140, 0.2311892808528265], device=device)
+    e_vals = torch.tensor(
+        [-0.3405911944959140, 0.2311892808528265], device=device)
     kt = torch.tensor(0.0036749324000000, device=device)
     e_fermi = {'fermi': torch.tensor(-0.0547009568215437, device=device),
                'gaussian': torch.tensor(-0.0547009568215437, device=device)}
@@ -66,7 +67,8 @@ def CH4(device):
 def H2COH(device):
     e_vals = torch.tensor(
         [-0.9343300049471552, -0.5673872360060783, -0.4452360020405934, -0.3983502655691470, -0.3683978271535110,
-         -0.3125648536497793, -0.1503005758641445, 0.3620506858789189, 0.4193044337046300, 0.4627017592047214,
+         -0.3125648536497793, -
+         0.1503005758641445, 0.3620506858789189, 0.4193044337046300, 0.4627017592047214,
          0.5310120066272412], device=device)
     kt = torch.tensor(0.0036749324000000, device=device)
     e_fermi = {'fermi': torch.tensor(-0.1503005758641444, device=device),
@@ -81,22 +83,38 @@ def H2COH(device):
 def Au13(device):
     e_vals = torch.tensor(
         [-0.3527299502166848, -0.3446043323626678, -0.3446043323626677, -0.3446043323626675, -0.3396680431031974,
-         -0.3396680431031973, -0.3348665076928592, -0.3236859056397957, -0.3137384732690163, -0.3137384732690163,
-         -0.3137384732690162, -0.3130603572759072, -0.3130603572759071, -0.3130603572759070, -0.3103190418651061,
-         -0.3062146739029074, -0.3062146739029073, -0.3062146739029073, -0.2987540580770446, -0.2987540580770445,
-         -0.2891664255726048, -0.2891664255726047, -0.2891664255726045, -0.2886466040614372, -0.2886466040614371,
-         -0.2886466040614370, -0.2772119188018515, -0.2772119188018514, -0.2772119188018511, -0.2717068280935509,
-         -0.2717068280935508, -0.2717068280935507, -0.2680562588133010, -0.2680562588133009, -0.2680562588133009,
-         -0.2508237307023709, -0.2508237307023708, -0.2418141387259901, -0.2418141387259900, -0.2418141387259897,
-         -0.2288866289513421, -0.2288866289513419, -0.2288866289513417, -0.2178897159707643, -0.2178897159707643,
-         -0.2135507437165386, -0.2135507437165383, -0.2135507437165381, -0.2061925336110552, -0.2061925336110551,
-         -0.2061925336110549, -0.2053032768112894, -0.2053032768112893, -0.2053032768112892, -0.2036628759403381,
-         -0.2036628759403379, -0.2013005590857649, -0.2013005590857647, -0.2013005590857646, -0.2009927281347400,
-         -0.1947910664667635, -0.1947910664667633, -0.1947910664667631, -0.1827849468699932, -0.1827849468699929,
-         -0.1827849468699928, -0.1750536501383871, -0.1750536501383868, -0.1459052677523637, -0.1459052677523636,
-         -0.1459052677523634, -0.1408475250502909, -0.1373494312542527, -0.1373494312542526, -0.0821103630861045,
-         -0.0631299548293009, -0.0631299548293008, -0.0631299548293007, -0.0461239690150328, -0.0301246652659303,
-         -0.0301246652659300, -0.0301246652659290, 0.0103136738367398, 0.0103136738367401, 0.0103136738367404,
+         -0.3396680431031973, -0.3348665076928592, -
+         0.3236859056397957, -0.3137384732690163, -0.3137384732690163,
+         -0.3137384732690162, -0.3130603572759072, -
+         0.3130603572759071, -0.3130603572759070, -0.3103190418651061,
+         -0.3062146739029074, -0.3062146739029073, -
+         0.3062146739029073, -0.2987540580770446, -0.2987540580770445,
+         -0.2891664255726048, -0.2891664255726047, -
+         0.2891664255726045, -0.2886466040614372, -0.2886466040614371,
+         -0.2886466040614370, -0.2772119188018515, -
+         0.2772119188018514, -0.2772119188018511, -0.2717068280935509,
+         -0.2717068280935508, -0.2717068280935507, -
+         0.2680562588133010, -0.2680562588133009, -0.2680562588133009,
+         -0.2508237307023709, -0.2508237307023708, -
+         0.2418141387259901, -0.2418141387259900, -0.2418141387259897,
+         -0.2288866289513421, -0.2288866289513419, -
+         0.2288866289513417, -0.2178897159707643, -0.2178897159707643,
+         -0.2135507437165386, -0.2135507437165383, -
+         0.2135507437165381, -0.2061925336110552, -0.2061925336110551,
+         -0.2061925336110549, -0.2053032768112894, -
+         0.2053032768112893, -0.2053032768112892, -0.2036628759403381,
+         -0.2036628759403379, -0.2013005590857649, -
+         0.2013005590857647, -0.2013005590857646, -0.2009927281347400,
+         -0.1947910664667635, -0.1947910664667633, -
+         0.1947910664667631, -0.1827849468699932, -0.1827849468699929,
+         -0.1827849468699928, -0.1750536501383871, -
+         0.1750536501383868, -0.1459052677523637, -0.1459052677523636,
+         -0.1459052677523634, -0.1408475250502909, -
+         0.1373494312542527, -0.1373494312542526, -0.0821103630861045,
+         -0.0631299548293009, -0.0631299548293008, -
+         0.0631299548293007, -0.0461239690150328, -0.0301246652659303,
+         -0.0301246652659300, -
+         0.0301246652659290, 0.0103136738367398, 0.0103136738367401, 0.0103136738367404,
          0.0519917830212956, 0.0519917830212958, 0.0896344847999815, 0.0896344847999818, 0.0896344847999822,
          0.0936007927691514, 0.0936007927691517, 0.0936007927691523, 0.1583778013667147, 0.1583778013667151,
          0.1583778013667153, 0.1899425534402224, 0.1899425534402227, 0.1899425534402230, 0.1943635284217193,
@@ -181,8 +199,9 @@ def _entropy_batch(e_func, device):
     assert check_3, f'Device persistence check failed {({e_func_name})}'
 
     # Check 4: ensure a `basis` object can be used inplace of an e_mask
-    basis = Basis(
-        [torch.tensor(i) for i in [[1, 1], [8, 1, 1], [6, 1, 1, 1, 1], [1, 1, 1, 6, 8], [79] * 13]],
+    basis = Shell(
+        [torch.tensor(i) for i in [[1, 1], [8, 1, 1], [
+            6, 1, 1, 1, 1], [1, 1, 1, 6, 8], [79] * 13]],
         {1: [0], 6: [0, 1], 8: [0, 1], 79: [0, 1, 2]})
 
     res_a = e_func(e_vals, ef, 0.0036749, e_mask=mask)
@@ -377,7 +396,8 @@ def test_gaussian_smearing_single(device):
     assert check_1, 'Failed tolerance check'
 
     # Check 2: result should be ∈ [0, 1].
-    check_2 = gaussian_smearing(torch.tensor(-1.), torch.tensor(0.), 1E-4) == 1
+    check_2 = gaussian_smearing(
+        torch.tensor(-1.), torch.tensor(0.), 1E-4) == 1
     assert check_2, 'Results not bound to the domain [0, 1]'
 
     # Check 3: an assertion error should be raised if `eigenvalues` &
@@ -400,7 +420,8 @@ def test_gaussian_smearing_single(device):
 
     # Check 6: 0d tensors can be passed in
     try:
-        pred_single = gaussian_smearing(torch.tensor(1.0), torch.tensor(fe), kt)
+        pred_single = gaussian_smearing(
+            torch.tensor(1.0), torch.tensor(fe), kt)
         ref = ref(np.array(1.0), fe, kt)
         assert np.allclose(pred_single.cpu().numpy(), ref)
     except Exception as e:
@@ -493,7 +514,7 @@ def test_gaussian_smearing_grad(device):
         e_vals, kt, e_fermi, *_ = mol(device)
         e_vals.requires_grad = True
         check_1 = gradcheck(
-            gaussian_smearing,(e_vals, e_fermi['gaussian'], kt),
+            gaussian_smearing, (e_vals, e_fermi['gaussian'], kt),
             raise_exception=False)
         assert check_1, f'Gradient check failed on {mol.__name__}'
 
@@ -553,7 +574,7 @@ def test_fermi_search_general(device):
 
     # Check 6: ensure a `basis` object can be used inplace of an e_mask
     e_vals, mask = pack([H2(device)[0], CH4(device)[0]], return_mask=True)
-    basis = Basis(
+    basis = Shell(
         torch.tensor([[1, 1, 0, 0, 0], [6, 1, 1, 1, 1]]),
         {1: [0], 6: [0, 1]}).to(device)
     n_elec = torch.tensor([H2(device)[-1], CH4(device)[-1]], **dv)
@@ -578,7 +599,8 @@ def test_fermi_search_single(device):
                              'gaussian_smearing': 'gaussian'}[scheme_name]
 
             e_vals, kt, e_fermi_ref, _, n_elec = mol(device)
-            e_fermi = fermi_search(e_vals, n_elec, kt, scheme=scheme, max_iter=1000)
+            e_fermi = fermi_search(
+                e_vals, n_elec, kt, scheme=scheme, max_iter=1000)
 
             # Check 1: tolerance check
             check_1 = torch.isclose(e_fermi, e_fermi_ref[ref_data_name])
@@ -617,10 +639,12 @@ def test_fermi_search_batch(device):
         ref_data_name = {'fermi_smearing': 'fermi',
                          'gaussian_smearing': 'gaussian'}[scheme_name]
 
-        e_fermi = fermi_search(e_vals, n_elec, kt, scheme=scheme, e_mask=mask)
+        e_fermi = fermi_search(
+            e_vals, n_elec, kt, scheme=scheme, e_mask=mask)
 
         # Check 1: tolerance check
-        check_1 = torch.allclose(e_fermi, torch.stack([i[2][ref_data_name] for i in mols]))
+        check_1 = torch.allclose(e_fermi, torch.stack(
+            [i[2][ref_data_name] for i in mols]))
         assert check_1, f'Failed to converge with {scheme_name} smearing'
 
         # Check 2: Repeat with spin unrestricted colinear

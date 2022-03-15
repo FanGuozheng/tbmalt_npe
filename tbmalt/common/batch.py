@@ -93,7 +93,6 @@ def pack(tensors: Sliceable, axis: int = 0,
     if size is None:
         size = torch.tensor([i.shape for i in tensors]).max(0).values
 
-
     # Tensor to pack into, filled with padding value.
     padded = torch.full((count, *size), value, dtype=dtype, device=device)
 
@@ -220,7 +219,8 @@ def merge(tensors: Sliceable, value: Any = 0, axis: int = 0) -> Tensor:
 
     n = 0  # <- batch dimension offset
     for src, size in zip(tensors, shapes):  # Assign values to tensor
-        merged[(slice(n, size[0] + n), *[slice(0, s) for s in size[1:]])] = src
+        merged[(slice(n, size[0] + n), *[slice(0, s)
+                for s in size[1:]])] = src
         n += size[0]
 
     # Return the merged tensor, transposing back as required

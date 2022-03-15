@@ -1,10 +1,9 @@
 """Test SCC DFTB."""
 import torch
-import os
 import pytest
 from torch.autograd import gradcheck
 from ase.build import molecule
-from tbmalt import Geometry, Basis, SkfFeed, Dftb1, Dftb2
+from tbmalt import Geometry, Shell, SkfFeed, Dftb1, Dftb2
 torch.set_printoptions(15)
 torch.set_default_dtype(torch.float64)
 
@@ -39,20 +38,23 @@ def test_h2o(device):
         6.587580500853424, 0.706209749573288, 0.706209749573288]))) < 1E-10
 
 
+test_h2o(torch.device('cpu'))
+
 @pytest.mark.skip(reason="Test SKF input too huge.")
 def test_h2o_var(device):
     """Test DFTB calculations with various interface."""
     geometry = Geometry.from_ase_atoms([molecule('H2O')], device=device)
 
-    # 1.1 Test basis with one variable
+    # 1.1 Test shell with one variable
     # all wavefunction compression radii set as 3.5
     path_to_skf = './tests/unittests/data/slko/vcr.h5'
-    grids = torch.tensor([1., 1.5, 2., 2.5, 3., 3.5, 4., 4.5, 5., 6., 8., 10.])
+    grids = torch.tensor(
+        [1., 1.5, 2., 2.5, 3., 3.5, 4., 4.5, 5., 6., 8., 10.])
     compr = torch.ones(*geometry.atomic_numbers.shape) * 3.5
     dftb2 = Dftb2(geometry=geometry,
                   shell_dict=shell_dict,
                   path_to_skf=path_to_skf,
-                  skf_type='h5', basis_type='vcr',
+                  skf_type='h5', shell_type='vcr',
                   interpolation='BicubInterp',
                   grids=grids,
                   multi_varible=compr)
@@ -63,7 +65,7 @@ def test_h2o_var(device):
     # 2.2 set all wavefunction compression radii as 2.75
     compr = torch.ones(*geometry.atomic_numbers.shape) * 2.75
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='vcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='vcr',
                   interpolation='BicubInterp', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([
@@ -72,19 +74,19 @@ def test_h2o_var(device):
     # 2.3 set wavefunction compression radii for O and H different
     compr = torch.tensor([[2.3, 3.0, 3.0]])
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='vcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='vcr',
                   interpolation='BicubInterp', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([
         6.588870121994031, 0.705564939002985, 0.705564939002985]))) < 5E-3
 
-    # 2.1 Test basis with two variable: density compression radii and
+    # 2.1 Test shell with two variable: density compression radii and
     # wavefunction compression radii, both are set the same here
     path_to_skf = './tests/unittests/data/slko/tvcr.h5'
     grids = torch.tensor([2., 2.5, 3., 4., 5., 7., 10.])
     compr = torch.ones(*geometry.atomic_numbers.shape, 2) * 3.5
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='tvcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='tvcr',
                   interpolation='BSpline', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([
@@ -92,7 +94,7 @@ def test_h2o_var(device):
     # 2.2 set all compression radii as 2.75
     compr = torch.ones(*geometry.atomic_numbers.shape, 2) * 2.75
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='tvcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='tvcr',
                   interpolation='BSpline', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([
@@ -101,7 +103,7 @@ def test_h2o_var(device):
     # 2.3 set density, compression radii differently
     compr = torch.tensor([[[8.0, 2.3], [2.5, 3.0], [2.5, 3.0]]])
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='tvcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='tvcr',
                   interpolation='BSpline', grids=grids, multi_varible=compr)
     dftb2()
     assert(abs(dftb2.charge - torch.tensor([
@@ -152,13 +154,13 @@ def test_batch_vcr(device):
     geometry = Geometry.from_ase_atoms([
         molecule('CH4'), molecule('H2O'), molecule('C2H6')])
 
-    # 1. Test basis with two variable: density compression radii and
+    # 1. Test shell with two variable: density compression radii and
     # wavefunction compression radii, both are set the same here
     path_to_skf = '/tests/unittests/data/slko/tvcr.h5'
     grids = torch.tensor([2., 2.5, 3., 4., 5., 7., 10.])
     compr = torch.ones(*geometry.atomic_numbers.shape, 2) * 3.5
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='tvcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='tvcr',
                   interpolation='BSpline', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([
@@ -181,7 +183,7 @@ def test_batch_vcr(device):
         mask = geometry.atomic_numbers == iu
         compr[mask] = init_dict[iu.tolist()]
     dftb2 = Dftb2(geometry, shell_dict=shell_dict,
-                  path_to_skf=path_to_skf, skf_type='h5', basis_type='tvcr',
+                  path_to_skf=path_to_skf, skf_type='h5', shell_type='tvcr',
                   interpolation='BSpline', grids=grids, multi_varible=compr)
     dftb2()
     assert torch.max(abs(dftb2.charge - torch.tensor([

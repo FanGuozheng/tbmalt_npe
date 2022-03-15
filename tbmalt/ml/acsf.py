@@ -59,6 +59,7 @@ class Acsf:
         self.geometry = geometry
         self.shell_dict = shell_dict
         self.form = form
+        self.fc_form = kwargs.get('fc_form', 'cos')
         self.element_resolve = element_resolve
         if self.form == 'distance' and not self.element_resolve:
             warnings.warn(
@@ -122,16 +123,20 @@ class Acsf:
         g1_params = g1_params * length_angstrom_units[unit]
         if g2_params is not None:
             self._g_error_message(g2_params, 2)
-            g2_params[..., 1] = g2_params[..., 1] * length_angstrom_units[unit]
+            g2_params[..., 1] = g2_params[..., 1] * \
+                length_angstrom_units[unit]
         if g3_params is not None:
             self._g_error_message(g3_params, 1)
-            g3_params[..., 0] = g3_params[..., 0] / length_angstrom_units[unit]
+            g3_params[..., 0] = g3_params[..., 0] / \
+                length_angstrom_units[unit]
         if g4_params is not None:
             self._g_error_message(g4_params, 3)
-            g4_params[..., 0] = g4_params[..., 0] * length_angstrom_units[unit]
+            g4_params[..., 0] = g4_params[..., 0] * \
+                length_angstrom_units[unit]
         if g5_params is not None:
             self._g_error_message(g5_params, 3)
-            g5_params[..., 0] = g5_params[..., 0] * length_angstrom_units[unit]
+            g5_params[..., 0] = g5_params[..., 0] * \
+                length_angstrom_units[unit]
 
         # ACSF parameters
         self.g1_params = g1_params
@@ -160,10 +165,43 @@ class Acsf:
         if self.g5_params is not None:
             self.g, self.g5 = self.g5_func(self.g, self.g5_params)
 
+    def _update_geo(self, geometry: object):
+        """Update geometric information if geometry object changes."""
+        self.geometry = geometry
+        self.periodic = self.geometry.isperiodic
+        an = self.geometry.atomic_numbers
+        _old_an = self.atomic_numbers.clone()
+        self.atomic_numbers = an if an.dim() == 2 else an.unsqueeze(0)
+        self.distances = self.geometry.distances if an.dim() == 2 else \
+            self.geometry.distances.unsqueeze(0)
+
+        self.unique_atomic_numbers = geometry.unique_atomic_numbers
+
+        # calculate G1, which is cutoff function
+        self.g1 = self.g1_func(self.g1_params)
+
+        if _old_an.shape != self.atomic_numbers.shape:
+            if self.g1_extra_params is not None:
+                self.extra_params_matrix = self._build_extra_params_matrix()
+            self.basis = Shell(self.atomic_numbers, self.shell_dict)
+            ano = self.basis.atomic_number_matrix(form='atomic')[..., 1]
+            self.ano = ano.view(-1, ano.shape[-1])
+
+        elif not (_old_an == self.atomic_numbers).all():
+            self.basis = Shell(self.atomic_numbers, self.shell_dict)
+            ano = self.basis.atomic_number_matrix(form='atomic')[..., 1]
+            self.ano = ano.view(-1, ano.shape[-1])
+
+        # transfer all geometric parameters to angstrom unit
+        d_vect = self.geometry.distance_vectors / \
+            length_angstrom_units[self.unit]
+        self._d_vec = d_vect.unsqueeze(0) if d_vect.dim() == 3 else d_vect
+        self._dist = self.distances / length_angstrom_units[self.unit]
+
     def _g_error_message(self, g, size):
         """Check the size of G parameters."""
         assert g.shape[-1] == size, f'There should be {size} parameters' + \
-            f' in G, but get {g3_params.shape[-1]} parameters'
+            f' in G, but get {g.shape[-1]} parameters'
 
     def g1_func(self, g1_params):
         """Calculate G1 parameters."""
@@ -269,7 +307,8 @@ class Acsf:
             pe_dist = self.periodic.distances.permute(0, -1, 1, 2)
             d_vect_ijk = (self.d_vec.unsqueeze(-2).unsqueeze(1) *
                           self.pe_d_vec.unsqueeze(-3)).sum(-1)
-            dist_ijk = _dist.unsqueeze(-1).unsqueeze(1) * pe_dist.unsqueeze(-2)
+            dist_ijk = _dist.unsqueeze(-1).unsqueeze(1) * \
+                pe_dist.unsqueeze(-2)
             dist2_ijk = _dist.unsqueeze(-1).unsqueeze(1) ** 2 + \
                 pe_dist.unsqueeze(-2) ** 2
             _pe_fc = self.pe_fc.permute(0, -1, 1, 2).unsqueeze(-2)
@@ -277,7 +316,8 @@ class Acsf:
 
         # Make sure distance_vec like ijj, ikk are zero, since these do not
         # contribute to angle
-        mask_zero = torch.tril_indices(dist_ijk.shape[-1], dist_ijk.shape[-1])
+        mask_zero = torch.tril_indices(
+            dist_ijk.shape[-1], dist_ijk.shape[-1])
         dist_ijk[:, :, mask_zero[0], mask_zero[0]] = 0
 
         # create the terms in G4 or G5
@@ -369,13 +409,17 @@ class Acsf:
 
     def _fc(self, distances: Tensor, rcut: Tensor):
         """Return cutoff function"""
-        self.fc = torch.zeros(distances.shape)
-        mask = distances.lt(rcut) * distances.gt(0.0)
-        self.fc[mask] = 0.5 * (torch.cos(np.pi * distances[mask] / rcut) + 1.0)
+        if self.fc_form == 'cos':
+            self.fc = torch.zeros(distances.shape)
+            mask = distances.lt(rcut) * distances.gt(0.0)
+            self.fc[mask] = 0.5 * \
+                (torch.cos(np.pi * distances[mask] / rcut) + 1.0)
 
-        if self.isperiodic:
-            _pe_dist = self.pe_distances
-            self.pe_fc = torch.zeros(_pe_dist.shape)
-            mask_pe = _pe_dist.lt(rcut) * _pe_dist.gt(0.0)
-            self.pe_fc[mask_pe] = 0.5 * (
-                torch.cos(np.pi * _pe_dist[mask_pe] / rcut) + 1.0)
+            if self.isperiodic:
+                _pe_dist = self.pe_distances
+                self.pe_fc = torch.zeros(_pe_dist.shape)
+                mask_pe = _pe_dist.lt(rcut) * _pe_dist.gt(0.0)
+                self.pe_fc[mask_pe] = 0.5 * (
+                    torch.cos(np.pi * _pe_dist[mask_pe] / rcut) + 1.0)
+        elif self.fc_form == 'exp':
+            self.fc = torch.exp(rcut[0] * (distances - rcut[1]) ** 2)

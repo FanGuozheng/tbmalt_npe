@@ -32,10 +32,9 @@ class Dscribe:
 
     def __init__(self, geometry, **kwargs):
         self.geometry = geometry
-        self.global_specie = self.geometry.unique_atomic_numbers()
+        self.global_specie = self.geometry.unique_atomic_numbers
         self.feature_type = kwargs.get('feature_type', 'acsf')
         self.periodic = self.geometry.isperiodic
-        geo_feature = kwargs.get('geo_feature', False)
 
         self._num = self.geometry.atomic_numbers.repeat_interleave(
             self.geometry.atomic_numbers.shape[1], 0)[self.geometry.atomic_numbers.ne(0).flatten()]
@@ -132,7 +131,6 @@ class Dscribe:
             _v = self._distancehomo()
             self.features = torch.cat([self.features, _v], 1)
 
-
     def cm(self, **kwargs):
         """Coulomb method for atomic environment.
 
@@ -165,7 +163,7 @@ class Dscribe:
         You should define all the atom species to fix the feature dimension!
         """
         # species = Geometry.to_element(self.geometry.numbers)
-        uat = self.geometry.unique_atomic_numbers()
+        uat = self.geometry.unique_atomic_numbers
         species = [chemical_symbols[iat] for iat in uat]
         dtype = torch.get_default_dtype()
         g1 = kwargs.get('G1', 6)
@@ -179,7 +177,8 @@ class Dscribe:
                     )
 
         _acsf = torch.cat([
-            torch.tensor(acsf.create(Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
+            torch.tensor(acsf.create(
+                Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
             for ispe, inum, ipos in
             zip(self.geometry.chemical_symbols, self.geometry.atomic_numbers,
                 self.geometry.positions.numpy())])
@@ -189,7 +188,7 @@ class Dscribe:
 
     def soap(self, **kwargs):
         """Smooth overlap of atomic positions (SOAP)."""
-        uat = self.geometry.unique_atomic_numbers()
+        uat = self.geometry.unique_atomic_numbers
         species = [chemical_symbols[iat] for iat in uat]
         dtype = torch.get_default_dtype()
         soap = SOAP(species=species,
@@ -201,7 +200,8 @@ class Dscribe:
                     sparse=False)
 
         _soap = torch.cat([
-            torch.tensor(soap.create(Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
+            torch.tensor(soap.create(
+                Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
             for ispe, inum, ipos in
             zip(self.geometry.chemical_symbols, self.geometry.atomic_numbers,
                 self.geometry.positions.numpy())])
@@ -213,7 +213,7 @@ class Dscribe:
         return _soap
 
     def mbtr(self, **kwargs):
-        uat = self.geometry.unique_atomic_numbers()
+        uat = self.geometry.unique_atomic_numbers
         species = [chemical_symbols[iat] for iat in uat]
         dtype = torch.get_default_dtype()
         mbtr = MBTR(species=species,
@@ -234,11 +234,13 @@ class Dscribe:
                     periodic=False,
                     normalization="l2_each")
 
-        _mbtr = torch.cat([
-            torch.tensor(mbtr.create(Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
+        _mbtr = torch.stack([
+            torch.tensor(mbtr.create(
+                Atoms(ispe, ipos[inum.ne(0)])), dtype=dtype)
             for ispe, inum, ipos in
             zip(self.geometry.chemical_symbols, self.geometry.atomic_numbers,
                 self.geometry.positions.numpy())])
+        return _mbtr
 
     def kernels(self):
         pass
@@ -258,18 +260,18 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * hubu[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
-            return _feature  #_feature.sum(-2)[mask0]
+            return _feature  # _feature.sum(-2)[mask0]
         else:
             return feature.flatten(end_dim=1)[
                 self.geometry.numbers.ne(0).flatten()].sum(-1).unsqueeze(1)
-
 
     def _distancevalence(self, cutoff=6.0, **kwargs):
         """Build electron negativity features."""
@@ -286,12 +288,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * val[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -304,7 +307,8 @@ class Dscribe:
 
         remp = []
         for inum, ipos in zip(self.geometry.numbers, self.geometry.distances):
-            _neg = torch.tensor([_atom_r_emp[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_atom_r_emp[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             remp.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         remp = pack(remp)
         mask_dist = self.geometry.distances.lt(cutoff)
@@ -312,12 +316,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * remp[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -330,7 +335,8 @@ class Dscribe:
 
         remp = []
         for inum, ipos in zip(self.geometry.numbers, self.geometry.distances):
-            _neg = torch.tensor([_atom_r_cal[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_atom_r_cal[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             remp.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         remp = pack(remp)
         mask_dist = self.geometry.distances.lt(cutoff)
@@ -338,12 +344,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * remp[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -357,7 +364,8 @@ class Dscribe:
 
         neg = []
         for inum, ipos in zip(self.geometry.numbers, self.geometry.distances):
-            _neg = torch.tensor([_ionization_energy[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_ionization_energy[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             neg.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         neg = pack(neg)
         mask_dist = self.geometry.distances.lt(cutoff)
@@ -365,12 +373,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * neg[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -384,7 +393,8 @@ class Dscribe:
 
         neg = []
         for inum, ipos in zip(self.geometry.atomic_numbers, self.geometry.distances):
-            _neg = torch.tensor([_electronnegativity[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_electronnegativity[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             neg.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         neg = pack(neg)
 
@@ -393,12 +403,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * neg[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -412,7 +423,8 @@ class Dscribe:
 
         neg = []
         for inum, ipos in zip(self.geometry.numbers, self.geometry.distances):
-            _neg = torch.tensor([_electron_affinity[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_electron_affinity[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             neg.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         neg = pack(neg)
         mask_dist = self.geometry.distances.lt(cutoff)
@@ -420,12 +432,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * neg[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
@@ -439,7 +452,8 @@ class Dscribe:
 
         neg = []
         for inum, ipos in zip(self.geometry.numbers, self.geometry.distances):
-            _neg = torch.tensor([_l_number[ii - 1] for ii in inum[inum.ne(0)]])
+            _neg = torch.tensor([_l_number[ii - 1]
+                                for ii in inum[inum.ne(0)]])
             neg.append(_neg.unsqueeze(1) - _neg.unsqueeze(0))
         neg = pack(neg)
         mask_dist = self.geometry.distances.lt(cutoff)
@@ -447,18 +461,18 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * neg[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:
             return feature.flatten(end_dim=1)[
                 self.geometry.numbers.ne(0).flatten()].sum(-1).unsqueeze(1)
-
 
     def _distancehomo(self, cutoff=6.0, **kwargs):
         """Build electron negativity features."""
@@ -475,12 +489,13 @@ class Dscribe:
             np.pi * self.geometry.distances[mask_dist] / cutoff) + 1) * neg[mask_dist]
 
         if self.specie_res:
-            _fea = feature.flatten(end_dim=1)[self.geometry.numbers.ne(0).flatten()]
+            _fea = feature.flatten(end_dim=1)[
+                self.geometry.numbers.ne(0).flatten()]
             _feature = torch.zeros(_fea.shape[0], 4)
-            _feature[..., 0] = _fea.masked_fill(self._num != 1 , 0).sum(-1)
-            _feature[..., 1] = _fea.masked_fill(self._num != 6 , 0).sum(-1)
-            _feature[..., 2] = _fea.masked_fill(self._num != 7 , 0).sum(-1)
-            _feature[..., 3] = _fea.masked_fill(self._num != 8 , 0).sum(-1)
+            _feature[..., 0] = _fea.masked_fill(self._num != 1, 0).sum(-1)
+            _feature[..., 1] = _fea.masked_fill(self._num != 6, 0).sum(-1)
+            _feature[..., 2] = _fea.masked_fill(self._num != 7, 0).sum(-1)
+            _feature[..., 3] = _fea.masked_fill(self._num != 8, 0).sum(-1)
 
             return _feature  # _feature.sum(-2)[mask0]
         else:

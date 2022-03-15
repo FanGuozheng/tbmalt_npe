@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """An interface to datset reading, loading and writing."""
-from typing import List, Union, Literal
+from typing import List, Literal
 import os
 import pickle
 import scipy
 import numpy as np
 import torch
 import h5py
-import ase
 import ase.io as io
 from torch import Tensor
 from tbmalt import Geometry
@@ -16,6 +15,8 @@ from torch.utils.data import Dataset as _Dataset
 from tbmalt.structures.geometry import to_atomic_numbers
 from tbmalt.common.batch import pack
 from tbmalt.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class Dataset(_Dataset):
@@ -277,7 +278,8 @@ class GeometryTo(object):
 
         # Select geometries with input indices
         if idx is not None:
-            self.in_geometry_files = [self.in_geometry_files[ii] for ii in idx]
+            self.in_geometry_files = [
+                self.in_geometry_files[ii] for ii in idx]
 
         # Create geometric files and input files
         if isinstance(self.in_geometry_files, list):

@@ -16,6 +16,7 @@ AIMS_ENERGY = {"H": -0.45891649, "C": -37.77330663, "N": -54.46973501,
 _AUEV = 27.2113845
 logger = logging.getLogger(__name__)
 
+
 class AseDftb:
     """Run DFTB+, return results, write into hdf5."""
 
@@ -64,7 +65,6 @@ class AseDftb:
         if self.latvecs is None:
             for ii, (iposition, isymbol) in enumerate(zip(positions, symbols)):
                 # run each molecule in batches
-                print('symbol', ii, isymbol)
                 logger.info(f'Calculating {isymbol}')
                 self.position, self.symbol = iposition, isymbol
                 self.nat = len(iposition)
@@ -297,8 +297,10 @@ class AseDftb:
 def get_matrix(filename):
     """Read DFTB+ hamsqr1.dat and oversqr.dat."""
     text = ''.join(open(filename, 'r').readlines())
-    string = re.search('(?<=MATRIX\n).+(?=\n)', text, flags=re.DOTALL).group(0)
-    out = np.array([[float(i) for i in row.split()] for row in string.split('\n')])
+    string = re.search('(?<=MATRIX\n).+(?=\n)', text,
+                       flags=re.DOTALL).group(0)
+    out = np.array([[float(i) for i in row.split()]
+                   for row in string.split('\n')])
     return torch.from_numpy(out)
 
 

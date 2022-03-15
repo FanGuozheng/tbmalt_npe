@@ -21,6 +21,7 @@ from tbmalt.structures.geometry import unique_atom_pairs, batch_chemical_symbols
 from tbmalt.common.maths.interpolation import (
     PolyInterpU, BicubInterp, Spline1d, MultiVarInterp, BSpline)
 from tbmalt.io.skf import Skf, VcrSkf, TvcrSkf
+from tbmalt.common.batch import pack
 
 
 class _SkFeed(ABC):
@@ -56,10 +57,10 @@ class _SkFeed(ABC):
         `off_site` & `on_site` method must take the keyword arguments
         (atom_pair, shell_pair, distances) and (atomic_numbers) respectively.
 
-        This behaviour is enforced to maintain consistency between the various
-        subclasses of `_SkFeed`'; which is necessary as the various subclasses
-        will likely differ significantly from one another & may become quite
-        complex.
+        This behaviour is enforced to maintain consistency between the
+        various subclasses of `_SkFeed`'; which is necessary as the various
+        subclasses will likely differ significantly from one another & may
+        become quite complex.
 
         Arguments:
             check_sig: Signature check not performed if ``check_sig = False``.
@@ -312,6 +313,8 @@ class SkfFeed(_SkFeed):
 
         if kwargs.get('orbital_resolve', False):
             raise NotImplementedError('Not implement orbital resolved U.')
+        train_onsite = kwargs.get('train_onsite', None)
+        basis = kwargs.get('basis', None)
 
         # Bicubic interpolation will be implemented soon
         if interpolation == 'CubicSpline':
@@ -323,7 +326,8 @@ class SkfFeed(_SkFeed):
         elif interpolation == 'Spline1d':
             interpolator = Spline1d
         else:
-            raise NotImplementedError('%s is not implemented.' % interpolation)
+            raise NotImplementedError(
+                '%s is not implemented.' % interpolation)
 
         if (is_dir := os.path.isdir(path)):
             warn('"hdf" binary Slater-Koster files are suggested, TBMaLT'
@@ -345,7 +349,8 @@ class SkfFeed(_SkFeed):
             element_pair = unique_atom_pairs(
                 unique_atomic_numbers=element_numbers)
         if skf_type == 'skf':
-            _element_name = [batch_chemical_symbols(ie) for ie in element_pair]
+            _element_name = [batch_chemical_symbols(
+                ie) for ie in element_pair]
             _path = [os.path.join(path, ien[0] + '-' + ien[1] + '.skf')
                      for ie, ien in zip(element_pair, _element_name)]
 
@@ -355,6 +360,13 @@ class SkfFeed(_SkFeed):
         hs_dict, onsite_hs_dict = cls._read(
             hs_dict, onsite_hs_dict, interpolator, element_pair,
             _path, skf_type, integral_type, shell_dict, device, **kwargs)
+
+        # If train onsite not globally, expand onsite for each atom
+        if train_onsite == 'local' and 'ml_onsite' not in onsite_hs_dict.keys():
+            assert basis is not None, 'If expand onsite for every atom in' + \
+                ' TvcrFeed, Basis object should be as input like: basis=basis'
+            onsite_hs_dict['ml_onsite'] = _expand_onsite(
+                onsite_hs_dict, geometry, **kwargs)
 
         return cls(hs_dict, onsite_hs_dict, **kwargs)
 
@@ -383,7 +395,7 @@ class SkfFeed(_SkFeed):
 
             if ielement[0] == ielement[1]:
                 onsite_hs_dict = _get_onsite_dict(
-                    onsite_hs_dict, skf, shell_dict, integral_type)
+                    onsite_hs_dict, skf, shell_dict, integral_type, **kwargs)
 
         return hs_dict, onsite_hs_dict
 
@@ -563,6 +575,8 @@ class VcrFeed(_SkFeed):
         # Check for element_numbers or geometry, which give unique atom pairs
         assert element_numbers is not None or geometry is not None, \
             'both element_numbers and geometry are None.'
+        train_onsite = kwargs.get('train_onsite', None)
+        basis = kwargs.get('basis', None)
 
         # create a blank dict for integrals
         hs_dict, onsite_hs_dict = {}, {}
@@ -600,6 +614,13 @@ class VcrFeed(_SkFeed):
                 _path_vcr, _path_homo, skf_type, integral_type, shell_dict,
                 device, **kwargs)
 
+        # If train onsite not globally, expand onsite for each atom
+        if train_onsite == 'local' and 'ml_onsite' not in onsite_hs_dict.keys():
+            assert basis is not None, 'If expand onsite for every atom ' + \
+                'in SkfFeed, Basis object should be as input'
+            onsite_hs_dict['ml_onsite'] = _expand_onsite(
+                onsite_hs_dict, geometry, **kwargs)
+
         return cls(hs_dict, onsite_hs_dict, vcr, **kwargs)
 
     @classmethod
@@ -624,7 +645,7 @@ class VcrFeed(_SkFeed):
         # Read homo values
         if element_pair[0] == element_pair[1]:
             onsite_hs_dict = _get_onsite_dict(
-                onsite_hs_dict, skf, shell_dict, integral_type)
+                onsite_hs_dict, skf, shell_dict, integral_type, **kwargs)
 
         return hs_dict, onsite_hs_dict
 
@@ -650,7 +671,8 @@ class VcrFeed(_SkFeed):
         if kwargs.get('orbital_resolve', False):
             raise NotImplementedError('Not implement orbital resolved U.')
 
-        interp = self.off_site_dict[(*atom_pair.tolist(), *shell_pair.tolist())]
+        interp = self.off_site_dict[(
+            *atom_pair.tolist(), *shell_pair.tolist())]
 
         # call the interpolator
         if variables is None:
@@ -726,7 +748,7 @@ class TvcrFeed(_SkFeed):
         self.off_site_dict = off_site_dict
         self.on_site_dict = on_site_dict
         self.compression_radii_grid = compression_radii_grid
-        self.train_onsite = kwargs.get('train_onsite', False)
+        self.train_onsite = kwargs.get('train_onsite', None)
 
     @classmethod
     def from_dir(cls, path: str,
@@ -782,6 +804,8 @@ class TvcrFeed(_SkFeed):
 
         if kwargs.get('orbital_resolve', False):
             raise NotImplementedError('Not implement orbital resolved U.')
+        train_onsite = kwargs.get('train_onsite', None)
+        basis = kwargs.get('basis', None)
 
         # Check for the interpolation method
         if interpolation == 'MultiVarInterp':
@@ -805,7 +829,8 @@ class TvcrFeed(_SkFeed):
             if skf_type == 'skf':
                 _path_tvcr = [os.path.join(
                     path, en[0] + '-' + en[1] + '.' + "{:05.2f}".format(dr1) +
-                    '.' + "{:05.2f}".format(dr2) + '.' + "{:05.2f}".format(wr1)
+                    '.' + "{:05.2f}".format(dr2) +
+                    '.' + "{:05.2f}".format(wr1)
                     + '.' + "{:05.2f}".format(wr2) + '.skf')
                     for dr1 in vcr for dr2 in vcr for wr1 in vcr for wr2 in vcr]
 
@@ -826,6 +851,13 @@ class TvcrFeed(_SkFeed):
                 _path_tvcr, _path_homo, skf_type, integral_type, shell_dict,
                 geometry, device, **kwargs)
 
+        # If train onsite not globally, expand onsite for each atom
+        if train_onsite == 'local' and 'ml_onsite' not in onsite_hs_dict.keys():
+            assert basis is not None, 'If expand onsite for every atom in' + \
+                ' TvcrFeed, Basis object should be as input like: basis=basis'
+            onsite_hs_dict['ml_onsite'] = _expand_onsite(
+                onsite_hs_dict, geometry, **kwargs)
+
         return cls(hs_dict, onsite_hs_dict, vcr, **kwargs)
 
     @classmethod
@@ -837,7 +869,6 @@ class TvcrFeed(_SkFeed):
               device: torch.device, **kwargs) -> List[dict]:
         """Read Slater-Koster files with various variables."""
         write_h5 = kwargs.get('write_h5', False)
-        train_onsite = kwargs.get('train_onsite', False)
         h5_name = kwargs.get('h5_name', './tvcr.hdf')
         skf = TvcrSkf.read(_path_tvcr, element_pair, path_homo=_path_homo)
 
@@ -851,10 +882,6 @@ class TvcrFeed(_SkFeed):
         if element_pair[0] == element_pair[1]:
             onsite_hs_dict = _get_onsite_dict(
                 onsite_hs_dict, skf, shell_dict, integral_type, **kwargs)
-
-        # If train onsite not globally, extend onsite for each atom
-        if train_onsite:
-            _train_onsite(onsite_hs_dict, geometry, skf)
 
         return hs_dict, onsite_hs_dict
 
@@ -880,7 +907,8 @@ class TvcrFeed(_SkFeed):
         if kwargs.get('orbital_resolve', False):
             raise NotImplementedError('Not implement orbital resolved U.')
 
-        interp = self.off_site_dict[(*atom_pair.tolist(), *shell_pair.tolist())]
+        interp = self.off_site_dict[(
+            *atom_pair.tolist(), *shell_pair.tolist())]
 
         # call the interpolator
         if variables is None:
@@ -1068,9 +1096,35 @@ class SkfParamFeed:
         return hs_cut
 
 
-def _train_onsite(onsite_hs_dict, geometry, skf):
+def _expand_onsite(onsite_hs_dict, geometry, **kwargs):
     """Gather onsite for machine learning if training is not global."""
-    onsite_hs_dict[(skf.atom_pair[0].tolist())]
+    # onsite_hs_dict[(skf.atom_pair[0].tolist())]
+    orbital_expand = kwargs.get('orbital_expand', True)
+
+    if orbital_expand:
+        basis = kwargs.get('basis')
+        an = geometry.atomic_numbers
+        o_shape = basis.orbital_matrix_shape[:-1]
+
+        # Get the onsite values for all non-padding elements & pass on the
+        # indices of the atoms just in case they are needed by the SkFeed
+        mask = an.nonzero(as_tuple=True)
+        os_flat = torch.cat([onsite_hs_dict[(ian.tolist())]
+                            for ian in an[mask]])
+
+        # Pack results if necessary (code has no effect on single systems)
+        c = torch.unique_consecutive((basis.on_atoms != -1).nonzero().T[0],
+                                     return_counts=True)[1]
+        return pack(torch.split(os_flat, tuple(c))).view(o_shape)
+    else:
+        an = geometry.atomic_numbers
+
+        # Get the onsite values for all non-padding elements & pass on the
+        # indices of the atoms just in case they are needed by the SkFeed
+        mask = an.nonzero(as_tuple=True)
+
+        return torch.cat([onsite_hs_dict[(ian.tolist())] for ian in an[mask]])
+
 
 def _path_to_skf(path, element, is_dir):
     """Return the joint path to the skf file or binary file."""
@@ -1083,14 +1137,16 @@ def _path_to_skf(path, element, is_dir):
 def _get_homo_dict(sktable_dict: dict, skf: object, **kwargs) -> dict:
     """Write onsite, Hubbert U and other homo parameters into dict."""
     if kwargs.get('orbital_resolve', False):
-        raise NotImplementedError('Not implement orbital resolved Hubbert U.')
+        raise NotImplementedError(
+            'Not implement orbital resolved Hubbert U.')
 
     assert skf.atom_pair[0] == skf.atom_pair[1]
 
     # return Hubbert U without orbital resolve
     sktable_dict[(skf.atom_pair[0].tolist(), 'U')
                  ] = skf.hubbard_us.unsqueeze(1)[-1]
-    sktable_dict[(skf.atom_pair[0].tolist(), 'occupations')] = skf.occupations
+    sktable_dict[(skf.atom_pair[0].tolist(), 'occupations')
+                 ] = skf.occupations
 
     return sktable_dict
 
@@ -1115,8 +1171,10 @@ def _get_dict(sk_dict: dict, skf: Skf, repulsive: bool = True) -> Tuple[dict, di
         sk_dict[(*skf.atom_pair.tolist(), 'rep_cut')] = skf.r_spline.cutoff
         sk_dict[(*skf.atom_pair.tolist(), 'spline_coef')
                 ] = skf.r_spline.spline_coef
-        sk_dict[(*skf.atom_pair.tolist(), 'exp_coef')] = skf.r_spline.exp_coef
-        sk_dict[(*skf.atom_pair.tolist(), 'tail_coef')] = skf.r_spline.tail_coef
+        sk_dict[(*skf.atom_pair.tolist(), 'exp_coef')
+                ] = skf.r_spline.exp_coef
+        sk_dict[(*skf.atom_pair.tolist(), 'tail_coef')
+                ] = skf.r_spline.tail_coef
 
     if skf.atom_pair[0] == skf.atom_pair[1]:
         sk_dict[(skf.atom_pair[0].tolist(), 'occupations')] = skf.occupations
@@ -1174,7 +1232,10 @@ def _get_hs_dict(hs_dict: dict, interpolator: object,
     return hs_dict
 
 
-def _get_onsite_dict(onsite_hs_dict: dict, skf: object, shell_dict, integral_type,
+def _get_onsite_dict(onsite_hs_dict: dict,
+                     skf: object,
+                     shell_dict: dict,
+                     integral_type: str,
                      **kwargs) -> Tuple[dict, dict]:
     """Write on-site of Hamiltonian or overlap.
 
@@ -1199,16 +1260,17 @@ def _get_onsite_dict(onsite_hs_dict: dict, skf: object, shell_dict, integral_typ
 
     """
     if kwargs.get('orbital_resolve', False):
-        raise NotImplementedError('Not implement orbital resolved Hubbert U.')
+        raise NotImplementedError(
+            'Not implement orbital resolved Hubbert U.')
 
-    train_onsite = kwargs.get('train_onsite', False)
+    train_onsite = kwargs.get('train_onsite', None)
 
     # # get index to expand homo parameters according to the orbitals
     max_l = max(shell_dict[int(skf.atom_pair[0])])
-    if kwargs.get('orbital_expand', True):
+    if kwargs.get('orbital_expand', True) or train_onsite != 'local':
         orb_index = [(ii + 1) ** 2 - ii ** 2 for ii in range(max_l + 1)]
     else:
-        orb_index = [1] * len(skf.onsite)
+        orb_index = [1 for ii in range(max_l + 1)]
 
     # flip make sure the order is along s, p ...
     if integral_type == 'H':

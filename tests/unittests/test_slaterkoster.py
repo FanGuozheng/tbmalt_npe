@@ -18,7 +18,7 @@ from tbmalt.physics.dftb.slaterkoster import (
     hs_matrix
 )
 from tbmalt.ml.skfeeds import _SkFeed
-from tbmalt import Geometry, Basis
+from tbmalt import Geometry, Shell
 
 ####################
 # Helper Functions #
@@ -150,9 +150,9 @@ class _TestSkFeed(_SkFeed):
 
 def molecules(device: torch.device, n: Optional[int] = None
               ) -> Union[
-                         Tuple[List[Tensor], List[Tensor]],
-                         Tuple[Tensor, Tensor]
-                        ]:
+    Tuple[List[Tensor], List[Tensor]],
+    Tuple[Tensor, Tensor]
+]:
     """Atomic numbers & positions of a small selection of molecules.
 
     This data is used in testing the ``hs_matrix`` function. This contains
@@ -224,7 +224,8 @@ def sk_rotation_data(batch: bool = False, **kwargs
     # identifying vectors where |y| > |z|.
     path = 'tests/unittests/data/slaterkoster'
     u_vecs = from_file(f'{path}/unit_vectors.dat', **kwargs)
-    r_mats = {ll: from_file(f'{path}/rot_{ll}.dat', **kwargs) for ll in range(4)}
+    r_mats = {ll: from_file(f'{path}/rot_{ll}.dat', **kwargs)
+              for ll in range(4)}
     yz_mask = u_vecs[:, 1].abs() > u_vecs[:, 2].abs()
 
     for f in skt_functions:
@@ -264,10 +265,12 @@ def sub_block_ref_data(batch: bool = False, **kwargs
 
     # Azimuthal quantum number pairs. The device on which l_pairs is placed is
     # irrelevant, as it is only ever used for indexing.
-    l_pairs = torch.tensor([[i, j] for i in range(4) for j in range(4) if i <= j])
+    l_pairs = torch.tensor([[i, j] for i in range(4)
+                           for j in range(4) if i <= j])
 
     # Reference block matrices
-    ff_m = torch.diag_embed(torch.arange(-3, 4, dtype=dtype, **kwargs).abs() + 1.)
+    ff_m = torch.diag_embed(
+        torch.arange(-3, 4, dtype=dtype, **kwargs).abs() + 1.)
     slices = list(reversed([slice(i, 7 - i) for i in range(4)]))
     results = [torch.atleast_1d(ff_m[r, c].squeeze()).clone()
                for l1, r in enumerate(slices) for c in slices[l1:]]
@@ -317,7 +320,8 @@ def sub_block_rot_data(batch: bool = False, **kwargs
     for l_pair in l_pairs:
         integrals = from_file(
             f'{path}/integrals_{min(l_pair)}_{max(l_pair)}.dat', **kwargs)
-        ref = from_file(f'{path}/block_rot_{l_pair[0]}_{l_pair[1]}.dat', **kwargs)
+        ref = from_file(
+            f'{path}/block_rot_{l_pair[0]}_{l_pair[1]}.dat', **kwargs)
         s = ... if batch else 0
         yield torch.tensor(l_pair), u_vecs[s], integrals[s], ref[s]
 
@@ -483,7 +487,7 @@ def test_gather_on_site_general(device):
     """
     atomic_numbers, positions = molecules(device, 1)
     geometry = Geometry(atomic_numbers, positions)
-    basis = Basis(atomic_numbers, shell_dict)
+    basis = Shell(atomic_numbers, shell_dict)
     sk_feed = _TestSkFeed(atomic_numbers.unique().tolist(), device=device)
 
     try:
@@ -509,7 +513,7 @@ def test_gather_on_site_single(device):
              for a1 in atoms for a2 in atoms if a1 <= a2]
 
     for geometry in geoms:
-        basis = Basis(geometry.atomic_numbers, shell_dict)
+        basis = Shell(geometry.atomic_numbers, shell_dict)
         pred = _gather_on_site(geometry, basis, sk_feed)
         ref = torch.cat(sk_feed.on_site(geometry.atomic_numbers))
         check_1 = torch.allclose(ref, pred)
@@ -528,11 +532,11 @@ def test_gather_on_site_batch(device):
     atoms = [1, 6, 79, 57]
     geoms = [build_geom(a1, a2, device=device)
              for a1 in atoms for a2 in atoms if a1 <= a2]
-    bases = [Basis(i.atomic_numbers, shell_dict) for i in geoms]
+    bases = [Shell(i.atomic_numbers, shell_dict) for i in geoms]
 
     geometry = Geometry([i.atomic_numbers for i in geoms],
                         [i.positions for i in geoms])
-    basis = Basis([i.atomic_numbers for i in geoms], shell_dict)
+    basis = Shell([i.atomic_numbers for i in geoms], shell_dict)
     pred = _gather_on_site(geometry, basis, sk_feed)
     ref = pack([torch.cat(sk_feed.on_site(i.atomic_numbers))
                 for i in geoms])
@@ -560,13 +564,13 @@ def test_gather_on_site_grad(device):
     sk_feed_s = _TestSkFeed(device=device, requires_grad=True)
     atomic_numbers_s = torch.tensor([57, 57])
     geom_s = Geometry(atomic_numbers_s, torch.rand(2, 3, device=device))
-    basis_s = Basis(atomic_numbers_s, shell_dict)
+    basis_s = Shell(atomic_numbers_s, shell_dict)
 
     sk_feed_b = _TestSkFeed(device=device, requires_grad=True)
     atomic_numbers_b = [torch.tensor(i) for i in [[1, 1], [1, 6], [57, 57]]]
     geom_b = Geometry(atomic_numbers_b,
                       [torch.rand(2, 3, device=device) for _ in range(3)])
-    basis_b = Basis(atomic_numbers_b, shell_dict)
+    basis_b = Shell(atomic_numbers_b, shell_dict)
 
     # Perform the grad checks
     grad_s = gradcheck(single_proxy,
@@ -595,7 +599,7 @@ def test_gather_off_site_general(device):
     # pair corresponds to the atom index given
 
     l_pair = torch.tensor([0, 1])
-    basis = Basis(torch.tensor([6, 1, 6, 6, 1, 6]), shell_dict)
+    basis = Shell(torch.tensor([6, 1, 6, 6, 1, 6]), shell_dict)
     sk_feed = _TestSkFeed(basis.atomic_numbers.unique().tolist(),
                           device=device)
 
@@ -663,7 +667,8 @@ def test_gather_off_site(device):
         shells = l_pair.expand(20, -1).clone()
 
         # Flip some elements of atom_pairs & shells to test the sorting code
-        atom_pairs = torch.vstack((atom_pairs[:-10], atom_pairs[-10:].flip(-1)))
+        atom_pairs = torch.vstack(
+            (atom_pairs[:-10], atom_pairs[-10:].flip(-1)))
         shells = torch.vstack((shells[:-10], shells[-10:].flip(-1)))
 
         pred = _gather_off_site(atom_pairs, shells, distances, sk_feed)
@@ -704,7 +709,7 @@ def test_hs_matrix_general(device):
     sk_feed = _TestSkFeed([1], device=device)
     atomic_numbers, positions = molecules(device=device)
     geometry = Geometry(atomic_numbers[0], positions[0])
-    basis = Basis(atomic_numbers[0], shell_dict)
+    basis = Shell(atomic_numbers[0], shell_dict)
 
     try:
         hs_matrix(geometry, basis, sk_feed,
@@ -729,7 +734,7 @@ def test_hs_matrix_single(device):
     sk_feed = _TestSkFeed(device=device)
     for atomic_numbers, positions in zip(*molecules(device=device)):
         geometry = Geometry(atomic_numbers, positions)
-        basis = Basis(atomic_numbers, shell_dict)
+        basis = Shell(atomic_numbers, shell_dict)
         res = hs_matrix(geometry, basis, sk_feed)
 
         # Tolerance threshold tests are not implemented, so just fail here
@@ -747,7 +752,7 @@ def test_hs_matrix_batch(device):
 
     atomic_numbers, positions = molecules(device=device)
     geometry = Geometry(atomic_numbers, positions)
-    basis = Basis(atomic_numbers, shell_dict)
+    basis = Shell(atomic_numbers, shell_dict)
     res = hs_matrix(geometry, basis, sk_feed)
 
     # Tolerance threshold tests are not implemented, so just fail here
@@ -783,12 +788,12 @@ def test_hs_matrix_grad(device):
             *sk_feed.on_site_values.values())
 
     geom_s = Geometry(atomic_numbers[1], positions[1])
-    basis_s = Basis(atomic_numbers[1], shell_dict)
+    basis_s = Shell(atomic_numbers[1], shell_dict)
     grad_s = gradcheck(proxy, (geom_s, basis_s, sk_feed, *args),
                        raise_exception=False)
 
     geom_b = Geometry(atomic_numbers[:-1], positions[:-1])
-    basis_b = Basis(atomic_numbers[:-1], shell_dict)
+    basis_b = Shell(atomic_numbers[:-1], shell_dict)
     grad_b = gradcheck(proxy, (geom_b, basis_b, sk_feed, *args),
                        raise_exception=False)
 
